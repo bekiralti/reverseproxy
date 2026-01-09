@@ -14,4 +14,3 @@ print(f"Client: Message {message} sent")
 
 client.close()
 print("Client: Connectin closed.")
-

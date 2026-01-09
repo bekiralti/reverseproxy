@@ -4,7 +4,6 @@ HOST = 'localhost'
 PORT = 1453
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # SOCK_STREAM is basically TCP
                                                            # DGRAM would be UDP
-
 server.bind((HOST, PORT))
 print(f"Server bound on {HOST}:{PORT}")
 
