@@ -6,11 +6,14 @@ client = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # SOCK_STREAM is basi
                                                            # DGRAM would be UDP
 #client.bind((HOST, PORT)) # bind is for servers to claim a port.
 client.connect((HOST, PORT))
-print(f"Client: Connected to {HOST}:{PORT}")
+print(f"[CLIENT] Connected to {HOST}:{PORT}")
 
-message = 'Hello'
+message = 'PING'
 client.send(message.encode('utf-8'))
-print(f"Client: Message {message} sent")
+print(f"[CLIENT] Sent {message}")
+
+message = client.recv(1024)
+print(f"[CLIENT] Received {message.decode('utf-8')}")
 
 client.close()
-print("Client: Connectin closed.")
+print('[CLIENT] Connection closed.')
