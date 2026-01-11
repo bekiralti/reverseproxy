@@ -20,11 +20,11 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         start = time.time()
         with conn:
             message = conn.recv(1024) # Buffersize set to 1024 Bytes.
-            print(f"[SERVER] Client {address} sent {message.decode('utf-8')}. Processing Time {time.time() - start:.2f} seconds")
+            print(f"[SERVER] Received {message.decode('utf-8')} from {address}. Processing Time {time.time() - start:.2f} seconds")
 
             # Processing client's request ... assume it is a heavy I/O operation and client is waiting for a response
             time.sleep(5)
 
-            message = 'Ve Aleykümselam'
+            message = 'PONG'
             conn.sendall(message.encode('utf-8'))
-            print(f"[SERVER] Replied {message} to client after {time.time() - start:.2f} seconds")
+            print(f"[SERVER] Sent {message} after {time.time() - start:.2f} seconds")
