@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 from asyncio import StreamReader # to make type hints more readible (StreamReader is a class)
 from asyncio import StreamWriter # to make type hints more readible (StreamWriter is a class)
