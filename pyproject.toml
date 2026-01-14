@@ -2,7 +2,7 @@
 name = "reverseproxy"
 version = "0.0.0"
 description = "Simple reverse proxy implementation"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 authors = [{ name = "Bekir Altindal", email = "bekir.altindal@rwth-aachen.de" }]
 
 [build-system]
