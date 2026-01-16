@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 async def callback(reader: StreamReader, writer: StreamWriter) -> None:
     message = await reader.read(1024)
     result = subprocess.run(
-        ['python', '../../example/echo.py', message.decode('utf-8')],
+        ['python', '../../examples/echo.py', message.decode('utf-8')],
         capture_output=True,
         text=True
     )
