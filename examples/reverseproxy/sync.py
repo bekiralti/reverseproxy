@@ -5,14 +5,19 @@ logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-8s %(me
 logger = logging.getLogger(__name__)
 
 async def callback(reader: StreamReader, writer: StreamWriter) -> None:
-    message = await reader.read(1024)
-    result = subprocess.run(
-        ['python', '../../examples/echo.py', message.decode('utf-8')],
-        capture_output=True,
-        text=True
-    )
-    message = result.stdout
-    writer.write(message.encode('utf-8'))
+    while True:
+        message = await reader.read(1024)
+
+        if not message:
+            break
+
+        result = subprocess.run(
+            ['python', '../echo.py', message.decode('utf-8')],
+            capture_output=True,
+            text=True
+        )
+        message = result.stdout
+        writer.write(message.encode('utf-8'))
     writer.close()
     await writer.wait_closed()
 
