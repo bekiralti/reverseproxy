@@ -1,0 +1,9 @@
+import logging, socket, sys
+
+logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
+logger = logging.getLogger('server')
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.connect(('127.0.0.1', 3001))
+    logger.debug(s.getsockname())
+    #s.sendall(sys.argv[1].encode())
