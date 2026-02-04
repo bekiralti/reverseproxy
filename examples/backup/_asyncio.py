@@ -1,4 +1,4 @@
-import asyncio
+import _asyncio
 
 def normal_function():
     return 'Hello from normal_function'
