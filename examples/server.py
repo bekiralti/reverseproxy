@@ -11,4 +11,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     with s.makefile('rb') as f:
         while True:
             message = f.readline()
+            if not message:
+                break
             logger.debug(f"Received message: {message.decode().strip()}")
