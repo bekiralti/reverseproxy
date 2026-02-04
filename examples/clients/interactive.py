@@ -9,6 +9,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
             print('[CLIENT] Cannot send empty message, try again.')
             continue
 
+        message += '\n'
         client.send(message.encode('utf-8'))
         message = client.recv(1024)
 
