@@ -1,4 +1,4 @@
-import logging, socket, sys
+import logging, socket
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
 logger = logging.getLogger('client')
