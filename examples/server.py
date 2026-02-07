@@ -1,16 +1,50 @@
-import logging, socket, sys
+import asyncio, logging, sys
+from prompt_toolkit import PromptSession
+from prompt_toolkit.patch_stdout import patch_stdout
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
 logger = logging.getLogger('server')
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.connect(('127.0.0.1', 3001))
-    message = str(sys.argv[1]) + '\n'
-    s.sendall(message.encode())
+async def read(reader):
+    while True:
+        message = await reader.readline()
+        if not message:
+            break
+        logger.info(f"Received message: {message.decode()}")
 
-    with s.makefile('rb') as f:
-        while True:
-            message = f.readline()
-            if not message:
-                break
-            logger.debug(f"Received message: {message.decode().strip()}")
+async def write(writer):
+    writer.write(f"{sys.argv[1]}\n".encode())
+    await writer.drain()
+
+    # TODO: Eventually rewrite the input mechanism with own looper.add_reader() logic
+    session = PromptSession()
+    while True:
+        with patch_stdout():
+            message = await session.prompt_async("Send message: ")
+        writer.write((message + '\n').encode())
+        await writer.drain()
+
+async def main():
+    reader, writer = await asyncio.open_connection('127.0.0.1', 3001)
+
+    # wait() returns `done` and `pending` tasks, however these are not needed at the moment
+    await asyncio.wait(
+        (asyncio.create_task(read(reader)), asyncio.create_task(write(writer))),
+        return_when=asyncio.FIRST_COMPLETED
+    )
+
+    writer.close()
+    await writer.wait_closed()
+
+asyncio.run(main(), debug=True)
+
+# with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+#     s.connect(('127.0.0.1', 3001))
+#     message = str(sys.argv[1]) + '\n'
+#     s.sendall(message.encode())
+#     with s.makefile('rb') as f:
+#         while True:
+#             message = f.readline()
+#             if not message:
+#                 break
+#             logger.debug(f"Received message: {message.decode().strip()}")
