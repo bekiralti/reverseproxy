@@ -61,7 +61,7 @@ async def client(reader, writer):
     if connection_id in connections:
         writer.write('Fatal error: Generated UUID already exists. Please connect again.\n'.encode())
         await writer.drain()
-        logger.fatal(f"Generated UUID:{connection_id} already exists")
+        logger.fatal(f"Generated UUID already exists")
         writer.close()
         await writer.wait_closed()
         return
