@@ -1,5 +1,4 @@
-import asyncio, json, logging, subprocess, uuid
-import sys
+import asyncio, json, logging, subprocess, uuid, sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,7 +58,7 @@ async def server(reader, writer):
 async def client(reader, writer):
     connection_id = uuid.uuid4()
     if connection_id in connections:
-        writer.write('Fatal error: Generated UUID already exists. Please connect again.\n'.encode())
+        writer.write('Fatal error in UUID creation. Please connect again.\n'.encode())
         await writer.drain()
         logger.fatal(f"Generated UUID already exists")
         writer.close()
@@ -67,7 +66,11 @@ async def client(reader, writer):
         return
     connections[connection_id] = Connection(client_reader=reader, client_writer=writer)
 
-    subprocess.Popen([sys.executable, '../../examples/server.py', str(connection_id)])
+    subprocess.Popen([
+        sys.executable,
+        (Path(__file__).parent / '../../examples/server.py').resolve(),
+        str(connection_id)
+    ])
 
     # global server_count, target_id
     #
