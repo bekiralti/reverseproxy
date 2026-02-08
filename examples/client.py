@@ -10,7 +10,7 @@ async def read(reader):
         message = await reader.readline()
         if not message:
             break
-        logger.info(f"Received message: {message.decode()}")
+        logger.info(f"Received message: {message.decode().strip()}")
 
 async def write(writer):
     # TODO: Eventually rewrite the input mechanism with own looper.add_reader() logic
