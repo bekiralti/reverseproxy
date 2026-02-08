@@ -10,7 +10,7 @@ async def read(reader):
         message = await reader.readline()
         if not message:
             break
-        logger.info(f"Received message: {message.decode()}")
+        logger.info(f"Received message: {message.decode().strip()}")
 
 async def write(writer):
     writer.write(f"{sys.argv[1]}\n".encode())
