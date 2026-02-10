@@ -11,7 +11,6 @@ async def read(reader):
         message = await reader.readline()
         if not message:
             break
-        # logger.info(f"Received message: {message.decode().strip()}")
         print_formatted_text(f"Received message: {message.decode().strip()}")
 
 async def write(writer):
