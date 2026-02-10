@@ -1,6 +1,7 @@
 import asyncio, logging
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.shortcuts import print_formatted_text
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
 logger = logging.getLogger('client')
@@ -10,7 +11,8 @@ async def read(reader):
         message = await reader.readline()
         if not message:
             break
-        logger.info(f"Received message: {message.decode().strip()}")
+        # logger.info(f"Received message: {message.decode().strip()}")
+        print_formatted_text(f"Received message: {message.decode().strip()}")
 
 async def write(writer):
     # TODO: Eventually rewrite the input mechanism with own looper.add_reader() logic
