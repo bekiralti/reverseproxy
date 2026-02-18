@@ -1,0 +1,12 @@
+Reverseproxy {
+    background: $panel;
+    height: 20;
+    margin: 3;
+}
+
+ClientServerRow > LogContainer {
+    background: $panel;
+    height: 10;
+    margin: 3;
+    width: 1fr;
+}
