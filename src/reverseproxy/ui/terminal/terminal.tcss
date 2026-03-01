@@ -1,12 +1,21 @@
+Screen {
+    background: $surface;
+}
 Reverseproxy {
-    background: $panel;
+    background: $boost;
+    border: hkey;
     height: 20;
-    margin: 3;
+    margin-left: 2;
+    margin-right: 2;
+    margin-top: 1;
 }
 
 ClientServerRow > LogContainer {
-    background: $panel;
+    background: $boost;
+    border: vkey;
     height: 10;
-    margin: 3;
+    margin-left: 2;
+    margin-right: 2;
+    margin-top: 1;
     width: 1fr;
 }
