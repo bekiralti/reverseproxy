@@ -11,7 +11,7 @@ async def read(reader):
         message = await reader.readline()
         if not message:
             break
-        print_formatted_text(f"Received message: {message.decode().strip()}")
+        #print_formatted_text(f"Received message: {message.decode().strip()}")
 
 async def write(writer):
     writer.write(f"{sys.argv[1]}\n".encode())
@@ -21,9 +21,10 @@ async def write(writer):
     session = PromptSession()
     while True:
         with patch_stdout():
-            message = await session.prompt_async("Send message: ")
-        writer.write((message + '\n').encode())
-        await writer.drain()
+            # message = await session.prompt_async("Send message: ")
+            pass
+        # writer.write((message + '\n').encode())
+        # await writer.drain()
 
 async def main():
     reader, writer = await asyncio.open_connection('127.0.0.1', 3001)
