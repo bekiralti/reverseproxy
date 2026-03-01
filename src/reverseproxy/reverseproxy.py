@@ -11,45 +11,64 @@ class Connection:
     server_reader: asyncio.StreamReader = None
     server_writer: asyncio.StreamWriter = None
 
-async def forward_message(reader, writer):
-    while True:
-        message = await reader.readline()
-        if not message:
-            break
-        writer.write(message)
-        await writer.drain()
-    writer.close()
-    await writer.wait_closed()
-
 async def run_reverseproxy(ui_callback=None):
-    logger.debug('TEST')
     connections = {} # Keeps track of active client-server connections
+
+    async def forward_message(reader, writer, direction, connection_id):
+        while True:
+            message = await reader.readline()
+
+            # Empty `message` means the client disconnected
+            if not message:
+                break
+
+            if ui_callback:
+                await ui_callback(direction, connection_id, message.decode().strip())
+
+            writer.write(message)
+            await writer.drain()
+        address = writer.get_extra_info('peername')
+        logger.debug(f"Closing {address[0]}:{address[1]}")
+        logger.debug('=' * 100)
+        writer.close()
+        await writer.wait_closed()
 
     async def server_callback(reader, writer):
         connection_id = uuid.UUID((await reader.readline()).decode().strip())
 
         # Wichtig, damit die Zuordnung der Clients mit den Servern stimmt!
-        connections[connection_id].server_reader = reader
-        connections[connection_id].server_writer = writer
+        connection = connections[connection_id]
+        connection.server_reader = reader
+        connection.server_writer = writer
+
+        client_address = connection.client_writer.get_extra_info('peername')
+        server_address = connection.server_writer.get_extra_info('peername')
+        logger.debug(f"Fully initialized Client {client_address[0]}:{client_address[1]} <-> Server {server_address[0]}:{server_address[1]} connection")
+        logger.debug('=' * 100)
 
         await asyncio.gather(
             forward_message(
-                connections[connection_id].client_reader,
-                connections[connection_id].server_writer
+                connection.client_reader,
+                connection.server_writer,
+                'client_to_server',
+                connection_id
             ),
             forward_message(
-                connections[connection_id].server_reader,
-                connections[connection_id].client_writer
+                connection.server_reader,
+                connection.client_writer,
+                'server_to_client',
+                connection_id
             )
         )
 
         # At this point, the connection has been closed
         if ui_callback:
-            await ui_callback('del_connection', connection_id)
-
+            await ui_callback('delete_connection', connection_id)
         del connections[connection_id]
 
     async def client_callback(reader, writer):
+        client_address = writer.get_extra_info('peername')
+        logger.debug(f"Client {client_address[0]}:{client_address[1]} connected")
         connection_id = uuid.uuid4()
         if connection_id in connections:
             writer.write('Randomly generated UUID already exists. Please connect again.\n'.encode())
@@ -59,6 +78,7 @@ async def run_reverseproxy(ui_callback=None):
             await writer.wait_closed()
             return
         connections[connection_id] = Connection(client_reader=reader, client_writer=writer)
+        logger.debug(f"A new Connection with the connection ID {connection_id} has been created")
 
         if ui_callback:
             await ui_callback('new_connection', connection_id)
@@ -68,9 +88,12 @@ async def run_reverseproxy(ui_callback=None):
             (Path(__file__).parent.parent.parent / 'examples/server.py').resolve(),
             str(connection_id)
         ])
+        logger.debug(f"A server for the client {client_address[0]}:{client_address[1]} has been started")
 
-    clients = await asyncio.start_server(client_callback, '127.0.0.1', 3000) # Handles the message forwardings
-    servers = await asyncio.start_server(server_callback, '127.0.0.1', 3001) # Handles the server registrations
+    logger.debug("Starte Reverseproxy")
+    logger.debug('=' * 100)
+    clients = await asyncio.start_server(client_callback, '127.0.0.1', 3000)
+    servers = await asyncio.start_server(server_callback, '127.0.0.1', 3001)
     async with clients, servers:
         try:
             await asyncio.gather(clients.serve_forever(), servers.serve_forever())
