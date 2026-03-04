@@ -1,6 +1,7 @@
 Screen {
     background: $surface;
 }
+
 Reverseproxy {
     background: $boost;
     border: hkey;

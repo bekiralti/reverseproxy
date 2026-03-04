@@ -1,4 +1,4 @@
-# Own modules
+# Local modules
 from reverseproxy.reverseproxy import run_reverseproxy
 
 # Standard modules
@@ -26,7 +26,7 @@ class LogContainer(ScrollableContainer):
 class Reverseproxy(LogContainer):
     # textualize methods
     def on_mount(self) -> None:
-        # To catch and display logging messages from the reverseproxy module
+        # To catch and display logging messages from the src module
         logging.getLogger('reverseproxy').addHandler(LogHandler(self))
         logging.getLogger('reverseproxy').setLevel(logging.DEBUG)
 
@@ -37,7 +37,7 @@ class ClientServerRow(HorizontalGroup):
 
 class TUI(App):
     # textualize attributes
-    CSS_PATH = 'terminal.tcss'
+    CSS_PATH = 'tui.tcss'
 
     # textualize methods
     def compose(self) -> ComposeResult:
