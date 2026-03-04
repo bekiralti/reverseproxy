@@ -14,8 +14,7 @@ async def read(reader):
         if not message:
             break
 
-        # print_formatted_text(f"Received message: {message.decode().strip()}")
-        logger.debug(f"Received message: {message.decode().strip()}")
+        print_formatted_text(f"Received message: {message.decode().strip()}")
 
 async def write(writer):
     # TODO: Eventually rewrite the input mechanism with own looper.add_reader() logic
