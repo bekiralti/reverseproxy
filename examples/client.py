@@ -9,9 +9,13 @@ logger = logging.getLogger('client')
 async def read(reader):
     while True:
         message = await reader.readline()
+
+        # Empty `message` means the client disconnected
         if not message:
             break
-        print_formatted_text(f"Received message: {message.decode().strip()}")
+
+        # print_formatted_text(f"Received message: {message.decode().strip()}")
+        logger.debug(f"Received message: {message.decode().strip()}")
 
 async def write(writer):
     # TODO: Eventually rewrite the input mechanism with own looper.add_reader() logic
@@ -19,6 +23,8 @@ async def write(writer):
     while True:
         with patch_stdout():
             message = await session.prompt_async("Send message: ")
+
+        # `\n` is added for the receiving side, so that they can identify the end of the message
         writer.write((message + '\n').encode())
         await writer.drain()
 
@@ -34,4 +40,4 @@ async def main():
     writer.close()
     await writer.wait_closed()
 
-asyncio.run(main(), debug=True)
+asyncio.run(main(), debug=False)
