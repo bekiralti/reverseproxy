@@ -1,6 +1,5 @@
-import asyncio, logging, subprocess, sys, uuid
+import asyncio, logging, subprocess,  uuid
 from dataclasses import dataclass
-from pathlib import Path
 
 logger = logging.getLogger('reverseproxy')
 
@@ -45,11 +44,14 @@ async def run_reverseproxy(ui_callback=None):
             await ui_callback('new_connection', connection_id)
 
         # TODO: Make this in the asyncio style
+        # Make sure to regularly delete logs
         subprocess.Popen([
-            sys.executable,
-            (Path(__file__).parent.parent.parent / 'examples/server.py').resolve(),
-            str(connection_id)
-        ])
+            'docker', 'run',
+            '-it', '--add-host=host.docker.internal:host-gateway', '-e', f"CONNECTION_ID={str(connection_id)}",
+            'server'],
+            stdout=open(f"/tmp/docker_out.log", 'w'), # TODO: FIX
+            stderr=open(f"/tmp/docker_err.log", 'w')  # TODO: FIX
+        )
 
     async def server_callback(reader, writer):
         """ Maps the server with its corresponding client and starts the message forwarding for this Connection """
@@ -95,7 +97,7 @@ async def run_reverseproxy(ui_callback=None):
     clients = await asyncio.start_server(client_callback, '127.0.0.1', 3000)
 
     logger.debug("TCP-Socket für Server-Verbindungen wird aktiviert.")
-    servers = await asyncio.start_server(server_callback, '127.0.0.1', 3001)
+    servers = await asyncio.start_server(server_callback, '0.0.0.0', 3001)
 
     # Run both TCP sockets asynchronously
     async with clients, servers:
