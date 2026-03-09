@@ -1,29 +1,16 @@
-# Programmablauf
+For each Client the reverseproxy spawns a docker container. The docker container can be anything, there is a simple example in `examples/server.py` and a Dockerfile `dockerfiles/server.docker` for it to create the docker container. 
 
-1. Client Verbindungen annehmen. Verwende `asyncio` um mehrere Clients *gleichzeitig* zu verarbeiten.
-   ```python
-   import asyncio
-   
-   async def client_callback(reader, writer):
-       pass
-   
-   async def run_reverseproxy():
-       socket_for_client_connections = await asyncio.start_server(client_callback, '127.0.0.1', 3000)
-       async with socket_for_client_connections:
-           await socket_for_client_connections.serve_forever()
-   
-   asyncio.run(run_reverseproxy())
-   ```
-   
-2. Eine eindeutige Connection ID zuweisen, um Client und Server in einem Look-Up-Table zu speichern.
-   ```python
-   import collections
-   
-   def get_id():
-       if released_ids:
-   
-   async def client_callback(reader, writer):
-       connection_id = get_id()
-   ```
+If you want to use your custom Docker container you have to adjust `server` in the line in `src/reverseproxy/reverseproxy.py`
+
+```python
+await asyncio.create_subprocess_exec(
+    docker', 'run', '--init', '--rm', '--add-host=host.docker.internal:host-gateway',
+    '-e', f"CONNECTION_ID={str(connection_id)}", 'server'
+)
+```
+
+to the name of your custom Docker container.
+
+The connection between Client <-> Reverseproxy <-> Server is continous and will be deleted if the Client disconnects (or the Reverseproxy or the Server crashes). 
 
 **Work in progress**
