@@ -3,7 +3,7 @@
 
 # Brief description
 
-The reverseproxy spawns for each connecting Client a Docker container and establishes the connection between Client and Server (in this case Docker container).
+The reverseproxy spawns for each connecting Client a Docker container and establishes the connection between Client and Server (in this case Docker container) through the reverseproxy.
 
 # Installation
 
