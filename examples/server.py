@@ -1,45 +1,54 @@
 import asyncio, logging, os
-from prompt_toolkit import PromptSession
-from prompt_toolkit.patch_stdout import patch_stdout
-from prompt_toolkit.shortcuts import print_formatted_text
 
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
+# logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
 logger = logging.getLogger('server')
 
-async def read(reader):
+async def read(client_reader, ui_writer):
     while True:
-        message = await reader.readline()
+        message = await client_reader.readline()
+
+        # *empty* message means disconnection
         if not message:
             break
-        # print_formatted_text(f"Received message: {message.decode().strip()}")
 
-async def write(writer):
-    connection_id = os.environ.get('CONNECTION_ID')
-    logger.debug(f"CONNECTION_ID: {connection_id}")
-    writer.write(f"{os.environ.get('CONNECTION_ID')}\n".encode())
-    await writer.drain()
+        ui_writer.write(f"Receives: {message.decode().strip()}\n".encode())
+        await ui_writer.drain()
 
-    # TODO: Eventually rewrite the input mechanism with own looper.add_reader() logic
-    # session = PromptSession()
+    ui_writer.close()
+    await ui_writer.wait_closed()
+
+async def write(ui_reader, client_writer):
     while True:
-        pass
-        # with patch_stdout():
-            # message = await session.prompt_async("Send message: ")
+        message = await ui_reader.readline()
 
-        # `\n` is added for the receiving side, so that they can identify the end of the message
-        # writer.write((message + '\n').encode())
-        # await writer.drain()
+        # *empty* message means disconnection
+        if not message:
+            break
+
+        client_writer.write(message)
+        await client_writer.drain()
+
+    # ui_reader.readline() returns empty when either the client or the reverseproxy disconnects.
+    # When the client disconnects then client_reader, here client_writer will be closed by the reverseproxy.
+    # When the reverseproxy disconnects then the client_reader, here client_writer will be closed by the reverseproxy.
+    # Nonetheless
+    client_writer.close()
+    await client_writer.wait_closed()
 
 async def main():
-    reader, writer = await asyncio.open_connection('host.docker.internal', 3001)
+    connection_id = os.environ.get('CONNECTION_ID')
 
-    # wait() returns `done` and `pending` tasks, however these are not needed at the moment
-    await asyncio.wait(
-        (asyncio.create_task(read(reader)), asyncio.create_task(write(writer))),
-        return_when=asyncio.FIRST_COMPLETED
-    )
+    # Establish connection with the reverseproxy!
+    client_reader, client_writer = await asyncio.open_connection('host.docker.internal', 3001)
+    client_writer.write(f"{connection_id}\n".encode())
+    await client_writer.drain()
 
-    writer.close()
-    await writer.wait_closed()
+    # Also register the UI *connection*
+    ui_reader, ui_writer = await asyncio.open_connection('host.docker.internal', 3002)
+    ui_writer.write(f"{connection_id}\n".encode())
+    await ui_writer.drain()
 
-asyncio.run(main(), debug=True)
+    # Start
+    await asyncio.gather(read(client_reader, ui_writer), write(ui_reader, client_writer))
+
+asyncio.run(main(), debug=False)
