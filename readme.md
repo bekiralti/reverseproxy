@@ -3,7 +3,7 @@
 
 # Brief description
 
-The reverseproxy spawns for each connecting Client a Docker container and establishes the connection between Client and Server (in this case Docker container) through the reverseproxy.
+The reverseproxy spawns for each connecting client a docker container and establishes the connection between client and server (in this case docker container).
 
 # Installation
 
@@ -14,12 +14,12 @@ Assuming you are using a Linux distribution (might or might not work on other Op
    git clone https://github.com/bekiralti/reverseproxy
    cd reverseproxy
    ```
-3. Create `venv`:
+2. Create `venv`:
    ```python
    python -m venv .venv
    source .venv/bin/activate
    ```
-5. Install:
+3. Install:
    ```bash
    pip install .
    ```
@@ -30,7 +30,7 @@ Assuming you are using a Linux distribution (might or might not work on other Op
 
 # Example
 
-1. Create server.py docker container:
+1. Create `server.py` docker container:
    ```bash
    docker build -t server -f dockerfiles/server.dockerfile .
    ```
