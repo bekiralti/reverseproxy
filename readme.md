@@ -51,6 +51,6 @@ Assuming you are using a Linux distribution (might or might not work on other Op
 
 # Architecture
 
-It is designed in such a way that the core `src/reverseproxy/reverseproxy.py` can run on its own. It is not dependent from the UI. It is not dependent from the Docker container. This means you can fully provide your own UI implementation and Docker container.
+It is designed in such a way that the core `src/reverseproxy/reverseproxy.py` can run on its own. It is not dependent from the UI. It is not dependent from the docker container. This means you can fully provide your own UI implementation and docker container.
 
 *Further explanations coming soon.*
