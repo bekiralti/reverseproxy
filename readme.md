@@ -30,7 +30,7 @@ Assuming you are using a Linux distribution (might or might not work on other Op
 3. Create `venv`:
    ```python
    python -m venv .venv
-   source ..venv/bin/activate
+   source .venv/bin/activate
    ```
 5. Install:
    ```bash
