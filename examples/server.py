@@ -1,4 +1,4 @@
-import asyncio, logging, os, sys
+import asyncio, logging, os
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
@@ -11,24 +11,27 @@ async def read(reader):
         message = await reader.readline()
         if not message:
             break
-        print_formatted_text(f"Received message: {message.decode().strip()}")
+        # print_formatted_text(f"Received message: {message.decode().strip()}")
 
 async def write(writer):
-    writer.write(f"{sys.argv[1]}\n".encode())
+    connection_id = os.environ.get('CONNECTION_ID')
+    logger.debug(f"CONNECTION_ID: {connection_id}")
+    writer.write(f"{os.environ.get('CONNECTION_ID')}\n".encode())
     await writer.drain()
 
     # TODO: Eventually rewrite the input mechanism with own looper.add_reader() logic
-    session = PromptSession()
+    # session = PromptSession()
     while True:
-        with patch_stdout():
-            message = await session.prompt_async("Send message: ")
+        pass
+        # with patch_stdout():
+            # message = await session.prompt_async("Send message: ")
 
         # `\n` is added for the receiving side, so that they can identify the end of the message
-        writer.write((message + '\n').encode())
-        await writer.drain()
+        # writer.write((message + '\n').encode())
+        # await writer.drain()
 
 async def main():
-    reader, writer = await asyncio.open_connection('127.0.0.1', 3001)
+    reader, writer = await asyncio.open_connection('host.docker.internal', 3001)
 
     # wait() returns `done` and `pending` tasks, however these are not needed at the moment
     await asyncio.wait(
