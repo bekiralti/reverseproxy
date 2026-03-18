@@ -14,42 +14,48 @@
             display: flex;
             flex-direction: column;
             gap: 1rem;
-            max-width: 900px;
+            height: 100vh;
         }
 
         h2 { color: #569cd6; }
+        h3 { color: #9cdcfe; margin-bottom: 0.4rem; }
 
-        #status {
-            font-size: 0.85rem;
-            color: #f14c4c;
-        }
+        #status { font-size: 0.85rem; color: #f14c4c; }
         #status.connected { color: #4ec9b0; }
+
+        .layout {
+            display: flex;
+            gap: 1rem;
+            flex: 1;
+            overflow: hidden;
+        }
 
         .box {
             border: 1px solid #3c3c3c;
             padding: 0.6rem;
             background: #252526;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
         }
 
-        h3 { color: #9cdcfe; margin-bottom: 0.4rem; }
-
-        #messages {
-            max-height: 300px;
+        .scrollable {
+            flex: 1;
             overflow-y: auto;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             line-height: 1.6;
-            margin-bottom: 0.6rem;
+            margin-bottom: 0.5rem;
         }
 
-        .msg-in  { color: #4ec9b0; }
-        .msg-out { color: #9cdcfe; }
+        .msg-in     { color: #4ec9b0; }
+        .msg-out    { color: #9cdcfe; }
         .msg-status { color: #808080; font-style: italic; }
         .msg-error  { color: #f14c4c; }
+        .msg-log    { color: #d4d4d4; }
+        .msg-conn   { color: #dcdcaa; }
 
-        .input-row {
-            display: flex;
-            gap: 0.4rem;
-        }
+        .input-row { display: flex; gap: 0.4rem; }
 
         input {
             flex: 1;
@@ -58,7 +64,7 @@
             border: 1px solid #555;
             padding: 0.3rem 0.5rem;
             font-family: monospace;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
 
         button {
@@ -75,21 +81,30 @@
     </style>
 </head>
 <body>
-<h2>Reverseproxy WebUI</h2>
-<div id="status">● Nicht verbunden</div>
+<h2>Reverseproxy WebUI &nbsp;<span id="status">● Nicht verbunden</span></h2>
 
-<div class="box">
-    <h3>Nachrichten</h3>
-    <div id="messages"></div>
-    <div class="input-row">
-        <input type="text" id="input" placeholder="Nachricht an Server ..." disabled>
-        <button id="send-btn" onclick="sendMsg()" disabled>Senden</button>
+<div class="layout">
+    <!-- Links: Client ↔ Server Nachrichten -->
+    <div class="box">
+        <h3>Client ↔ Server</h3>
+        <div class="scrollable" id="messages"></div>
+        <div class="input-row">
+            <input type="text" id="input" placeholder="Nachricht an Server ..." disabled>
+            <button id="send-btn" onclick="sendMsg()" disabled>Senden</button>
+        </div>
+    </div>
+
+    <!-- Rechts: Reverseproxy Log -->
+    <div class="box">
+        <h3>Reverseproxy Log</h3>
+        <div class="scrollable" id="log"></div>
     </div>
 </div>
 
 <script>
     const statusEl  = document.getElementById("status");
     const messagesEl = document.getElementById("messages");
+    const logEl     = document.getElementById("log");
     const inputEl   = document.getElementById("input");
     const sendBtn   = document.getElementById("send-btn");
 
@@ -97,7 +112,6 @@
 
     ws.onopen = () => {
         statusEl.textContent = "● Verbinde ...";
-        statusEl.className = "";
     };
 
     ws.onclose = () => {
@@ -112,7 +126,7 @@
 
         switch (data.event) {
             case "status":
-                addMessage(data.message, "msg-status");
+                addMsg(messagesEl, data.message, "msg-status");
                 if (data.message.includes("hergestellt")) {
                     statusEl.textContent = "● Verbunden";
                     statusEl.className = "connected";
@@ -127,27 +141,41 @@
                 }
                 break;
             case "server_to_client":
-                addMessage(`← ${data.message}`, "msg-in");
+                addMsg(messagesEl, `← ${data.message}`, "msg-in");
                 break;
             case "error":
-                addMessage(`Fehler: ${data.message}`, "msg-error");
+                addMsg(messagesEl, `Fehler: ${data.message}`, "msg-error");
+                break;
+            case "log":
+                addMsg(logEl, data.message, "msg-log");
+                break;
+            case "new_connection":
+                addMsg(logEl, `Neue Verbindung ${data.connection_id}: ${data.client_addr[0]}:${data.client_addr[1]} ↔ ${data.server_addr[0]}:${data.server_addr[1]}`, "msg-conn");
+                break;
+            case "client_to_server":
+                addMsg(messagesEl, `→ ${data.message}`, "msg-out");
+                break;
+            case "server_log":
+                addMsg(logEl, `Server ${data.connection_id}: ${data.message}`, "msg-log");
+                break;
+            case "delete_connection":
+                addMsg(logEl, `Verbindung ${data.connection_id} geschlossen`, "msg-status");
                 break;
         }
     };
 
-    function addMessage(text, cssClass) {
+    function addMsg(container, text, cssClass) {
         const el = document.createElement("div");
         el.className = cssClass;
         el.textContent = text;
-        messagesEl.appendChild(el);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        container.appendChild(el);
+        container.scrollTop = container.scrollHeight;
     }
 
     function sendMsg() {
         const msg = inputEl.value.trim();
         if (!msg) return;
         ws.send(JSON.stringify({ event: "send", message: msg }));
-        addMessage(`→ ${msg}`, "msg-out");
         inputEl.value = "";
     }
 
