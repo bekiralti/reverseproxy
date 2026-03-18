@@ -4,7 +4,11 @@ version = "0.0.1"
 description = "One server for each client"
 requires-python = ">=3.10"
 authors = [{ name = "Bekir Altindal", email = "bekir.altindal@rwth-aachen.de" }]
-dependencies = ["aiohttp", "prompt-toolkit", "textual"]
+dependencies = [
+    "aiohttp==3.13.3",
+    "prompt-toolkit==3.0.52",
+    "textual==8.1.1"
+]
 
 [build-system]
 requires = ["setuptools"]
