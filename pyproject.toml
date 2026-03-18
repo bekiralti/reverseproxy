@@ -1,10 +1,10 @@
 [project]
 name = "reverseproxy"
-version = "0.0.0"
+version = "0.0.1"
 description = "One server for each client"
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 authors = [{ name = "Bekir Altindal", email = "bekir.altindal@rwth-aachen.de" }]
-dependencies = ["prompt-toolkit"]
+dependencies = ["prompt-toolkit", "textual"]
 
 [build-system]
 requires = ["setuptools"]
