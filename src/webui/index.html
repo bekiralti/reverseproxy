@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Reverseproxy WebUI</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        h2 { color: #569cd6; }
+        h3 { color: #9cdcfe; margin-bottom: 0.4rem; }
+
+        #status {
+            color: #f14c4c;
+            font-size: 0.85rem;
+        }
+        #status.connected { color: #4ec9b0; }
+
+        .box {
+            border: 1px solid #3c3c3c;
+            padding: 0.6rem;
+            background: #252526;
+        }
+
+        #log {
+            max-height: 180px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        .connection {
+            border: 1px solid #3c3c3c;
+            padding: 0.6rem;
+            background: #252526;
+        }
+
+        .connection h3 { color: #4ec9b0; }
+        .meta { font-size: 0.8rem; color: #808080; margin-bottom: 0.4rem; }
+
+        .messages {
+            max-height: 120px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            margin-bottom: 0.5rem;
+        }
+
+        .msg-out { color: #9cdcfe; }
+        .msg-in  { color: #4ec9b0; }
+
+        .input-row { display: flex; gap: 0.4rem; }
+
+        input {
+            flex: 1;
+            background: #2d2d2d;
+            color: #d4d4d4;
+            border: 1px solid #555;
+            padding: 0.3rem 0.5rem;
+            font-family: monospace;
+        }
+
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 0.3rem 0.8rem;
+            cursor: pointer;
+            font-family: monospace;
+        }
+
+        button:hover { background: #1177bb; }
+    </style>
+</head>
+<body>
+    <h2>Reverseproxy WebUI</h2>
+    <div id="status">● Nicht verbunden</div>
+
+    <div class="box">
+        <h3>Reverseproxy Log</h3>
+        <div id="log"></div>
+    </div>
+
+    <div id="connections"></div>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:8000/ws");
+        const statusEl = document.getElementById("status");
+        const logEl = document.getElementById("log");
+        const connectionsEl = document.getElementById("connections");
+
+        ws.onopen = () => {
+            statusEl.textContent = "● Verbunden";
+            statusEl.className = "connected";
+        };
+
+        ws.onclose = () => {
+            statusEl.textContent = "● Verbindung getrennt";
+            statusEl.className = "";
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            switch (data.event) {
+                case "log": {
+                    const el = document.createElement("div");
+                    el.textContent = data.message;
+                    logEl.appendChild(el);
+                    logEl.scrollTop = logEl.scrollHeight;
+                    break;
+                }
+                case "new_connection": {
+                    const div = document.createElement("div");
+                    div.className = "connection";
+                    div.id = `conn-${data.connection_id}`;
+                    div.innerHTML = `
+                        <h3>Connection ${data.connection_id}</h3>
+                        <div class="meta">
+                            Client: ${data.client_addr[0]}:${data.client_addr[1]}
+                            &nbsp;↔&nbsp;
+                            Server: ${data.server_addr[0]}:${data.server_addr[1]}
+                        </div>
+                        <div class="messages" id="msgs-${data.connection_id}"></div>
+                        <div class="input-row">
+                            <input type="text" id="input-${data.connection_id}" placeholder="Nachricht an Server ...">
+                            <button onclick="sendMsg(${data.connection_id})">Senden</button>
+                        </div>
+                    `;
+                    connectionsEl.appendChild(div);
+                    break;
+                }
+                case "client_to_server": {
+                    addMessage(data.connection_id, `→ ${data.message}`, "msg-out");
+                    break;
+                }
+                case "server_log": {
+                    addMessage(data.connection_id, `← ${data.message}`, "msg-in");
+                    break;
+                }
+                case "delete_connection": {
+                    document.getElementById(`conn-${data.connection_id}`)?.remove();
+                    break;
+                }
+            }
+        };
+
+        function addMessage(connectionId, text, cssClass) {
+            const el = document.createElement("div");
+            el.className = cssClass;
+            el.textContent = text;
+            const msgs = document.getElementById(`msgs-${connectionId}`);
+            msgs.appendChild(el);
+            msgs.scrollTop = msgs.scrollHeight;
+        }
+
+        function sendMsg(connectionId) {
+            const input = document.getElementById(`input-${connectionId}`);
+            if (!input.value.trim()) return;
+            ws.send(JSON.stringify({
+                event: "send_to_server",
+                connection_id: connectionId,
+                message: input.value.trim()
+            }));
+            input.value = "";
+        }
+
+        // Enter-Taste zum Senden
+        document.addEventListener("keydown", (e) => {
+            if (e.key !== "Enter") return;
+            const active = document.activeElement;
+            if (!active?.id?.startsWith("input-")) return;
+            const connectionId = parseInt(active.id.split("-")[1]);
+            sendMsg(connectionId);
+        });
+    </script>
+</body>
+</html>
