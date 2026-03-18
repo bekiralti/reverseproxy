@@ -17,8 +17,12 @@ async def log_docker_container(process, connection_id):
     """ Reads `process` (in this case Docker Container) output and redirects it to Reverseproxy's logging """
 
     stdout, stderr = await process.communicate()
-    logger.debug(f"Docker Container {connection_id}: {stdout.decode().strip()}")
-    logger.error(f"Docker Container {connection_id}: {stderr.decode().strip()}")
+
+    # Don't print/log empty messages
+    if stdout:
+        logger.debug(f"Docker Container {connection_id}: {stdout.decode().strip()}")
+    if stderr:
+        logger.error(f"Docker Container {connection_id}: {stderr.decode().strip()}")
 
 async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
     connections = {}                               # Look-Up-Table (LUT)
