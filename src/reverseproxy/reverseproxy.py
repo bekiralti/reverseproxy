@@ -1,7 +1,7 @@
 import asyncio, collections, logging
 from dataclasses import dataclass
 
-logger = logging.getLogger('reverseproxy')
+logger = logging.getLogger("reverseproxy")
 
 @dataclass
 class Connection:
@@ -12,10 +12,18 @@ class Connection:
     control_writer: asyncio.StreamWriter = None
     server_process: asyncio.subprocess.Process = None
 
+# Liest Container-Output und leitet ihn ins Reverseproxy-Log
+async def log_docker_container(process, connection_id):
+    """ Reads `process` (in this case Docker Container) output and redirects it to Reverseproxy's logging """
+
+    stdout, stderr = await process.communicate()
+    logger.debug(f"Docker Container {connection_id}: {stdout.decode().strip()}")
+    logger.error(f"Docker Container {connection_id}: {stderr.decode().strip()}")
+
 async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
-    connections = {}                              # Look-Up-Table (LUT)
-    new_connection_id = 0                         # connection ID counter
-    reusable_connection_ids = collections.deque() # connection IDs of closed connections are stored here for reuse
+    connections = {}                               # Look-Up-Table (LUT)
+    new_connection_id = 0                          # connection ID counter
+    reusable_connection_ids = collections.deque()  # connection IDs of closed connections are stored here for reuse
 
     async def forward_message(reader, writer, direction, connection_id) -> None:
         while True:
@@ -50,10 +58,21 @@ async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
         # Create Connection. Create Server. Save Connection in the LUT
         connection = Connection(client_reader=client_reader, client_writer=client_writer)
         connection.server_process = await asyncio.create_subprocess_exec(
-            'docker', 'run', '--init', '--rm', '--add-host=host.docker.internal:host-gateway',
-            '-e', f"CONNECTION_ID={str(connection_id)}", 'server'
+            "docker",
+            "run",
+            "--init",
+            "--rm",
+            "--add-host=host.docker.internal:host-gateway",
+            "-e",
+            f"CONNECTION_ID={str(connection_id)}",
+            "server",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
         connections[connection_id] = connection
+
+        # To see why the Docker Container crashes, or the Server cannot connect to this Reverseproxy
+        asyncio.create_task(log_docker_container(connection.server_process, connection_id))
 
     async def server_callback(server_reader, server_writer) -> None:
         # decode() message from bytes to string. strip() final `\n` which just marks the end of the transmission
@@ -64,13 +83,13 @@ async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
         connection.server_reader = server_reader
         connection.server_writer = server_writer
 
-        client_ip, client_port = connection.client_writer.get_extra_info('peername')
-        server_ip, server_port = connection.server_writer.get_extra_info('peername')
+        client_ip, client_port = connection.client_writer.get_extra_info("peername")
+        server_ip, server_port = connection.server_writer.get_extra_info("peername")
         logger.debug(f"Reverseproxy is ready: Client {client_ip}:{client_port} <-> Server {server_ip}:{server_port}")
 
         # Inform UI
         if callable(ui_callback):
-            ui_callback('new_connection', connection_id, (client_ip, client_port), (server_ip, server_port))
+            ui_callback("new_connection", connection_id, (client_ip, client_port), (server_ip, server_port))
 
         # `register_callback` making it possible for the UI to interact with the server
         # e.g. sending messages from the server through the UI
@@ -82,15 +101,15 @@ async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
                 forward_message(
                     connection.client_reader,
                     connection.server_writer,
-                    'client_to_server',
-                    connection_id
+                    "client_to_server",
+                    connection_id,
                 ),
                 forward_message(
                     connection.server_reader,
                     connection.client_writer,
-                    'server_to_client',
-                    connection_id
-                )
+                    "server_to_client",
+                    connection_id,
+                ),
             )
 
         # If the UI gets closed first, we ensure that the Docker processes are being stopped
@@ -102,7 +121,7 @@ async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
 
         # Inform UI
         if callable(ui_callback):
-            ui_callback('delete_connection', connection_id)
+            ui_callback("delete_connection", connection_id)
 
         reusable_connection_ids.append(connection_id)
         del connections[connection_id]
@@ -118,7 +137,7 @@ async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
                 break
 
             if callable(ui_callback):
-                ui_callback('server_log', connection_id, message.decode().strip())
+                ui_callback("server_log", connection_id, message.decode().strip())
 
         control_writer.close()
         await control_writer.wait_closed()
@@ -128,25 +147,29 @@ async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
         connection.control_writer.write(f"{message}\n".encode())
         await connection.control_writer.drain()
 
-    # Start TCP-Sockets
-    # To avoid timing issues, there is one Port for client side connections and one Port for server side connections
-    logger.debug("Start TCP-Socket for client connections")
-    logger.debug("Start TCP-Socket for server connections")
-    logger.debug("Start TCP-Socket for controller connections")
+    # Start TCP-Sockets:
+    # - To avoid timing issues, there is one Port for client side connections and one Port for server side connections
+    # - 0.0.0.0 because of the Docker namespace
+    # - `control_socket` is a way for the UI and server to interact with each other through this reverseproxy
+    # - Eventually: Only start the controllers_socket if `ui_callback` is not None, might be overly-complicating though.
+    logger.info("Start TCP-Socket for client connections ...")
+    clients_socket = await asyncio.start_server(client_callback, "127.0.0.1", 3000)
+    logger.debug(f"Ready TCP-Socket for client connections: {clients_socket}")
 
-    # 0.0.0.0 because of the Docker namespace
-    # `control_socket` is a way for the UI and server to interact with each other through this reverseproxy
-    # Eventually: Only start the controllers_socket if `ui_callback` is not None, might be overly-complicating though.
-    servers_socket = await asyncio.start_server(server_callback, '0.0.0.0', 3001)
-    control_socket = await asyncio.start_server(control_callback, '0.0.0.0', 3002)
-    clients_socket = await asyncio.start_server(client_callback, '127.0.0.1', 3000)
+    logger.info("Start TCP-Socket for server connections ...")
+    servers_socket = await asyncio.start_server(server_callback, "0.0.0.0", 3001)
+    logger.debug(f"Ready TCP-Socket for server connections: {servers_socket}")
+
+    logger.info("Start TCP-Socket for UI controller ...")
+    control_socket = await asyncio.start_server(control_callback, "0.0.0.0", 3002)
+    logger.debug(f"Ready TCP-Socket for UI controller: {control_socket}")
 
     async with clients_socket, servers_socket, control_socket:
         try:
             await asyncio.gather(
                 clients_socket.serve_forever(),
                 servers_socket.serve_forever(),
-                control_socket.serve_forever()
+                control_socket.serve_forever(),
             )
 
         # Ensure proper closing in case the UI shuts down first while there are still active connections
@@ -156,11 +179,20 @@ async def run_reverseproxy(ui_callback=None, register_callback=None) -> None:
                 # The EOF chain reaction will close every other connection as well. Nonetheless
                 connection.client_writer.close()
                 await connection.client_writer.wait_closed()
-                connection.server_writer.close()
-                await connection.server_writer.wait_closed()
-                connection.control_writer.close()
-                await connection.control_writer.wait_closed()
 
-if __name__ == '__main__':
+                if connection.server_writer:
+                    connection.server_writer.close()
+                    await connection.server_writer.wait_closed()
+                else:
+                    logger.debug("`connection.server_writer is empty")
+
+                if connection.control_writer:
+                    connection.control_writer.close()
+                    await connection.control_writer.wait_closed()
+                else:
+                    logger.debug("`connection.control_writer is empty")
+
+
+if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
     asyncio.run(run_reverseproxy(), debug=True)
