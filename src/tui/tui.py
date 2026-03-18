@@ -9,7 +9,7 @@ from typing import Callable, Tuple
 from textual.app import App, ComposeResult
 from textual.containers import HorizontalGroup, VerticalScroll, ScrollableContainer
 from textual.message import Message
-from textual.widgets import Input, Static
+from textual.widgets import Input, RichLog, Static
 
 
 # ─── Logging ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -17,18 +17,23 @@ from textual.widgets import Input, Static
 class LogHandler(logging.Handler):
     """ Make logging *visible* for the TUI """
 
-    def __init__(self, container) -> None:
+    def __init__(self, app) -> None:
         super().__init__()
-        self.container = container
+        self.app = app
 
     # ─── logging.Handler methods ──────────────────────────────────────────────────────────────────────────────────────
 
     def emit(self, record: logging.LogRecord) -> None:
         # format() is defined by the logging module
-        self.container.add_log(self.format(record))
+        self.app.post_message(LogMessage(self.format(record)))
 
 
 # ─── Custom Messages ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+class LogMessage(Message):
+    def __init__(self, message) -> None:
+        super().__init__()
+        self.message = message
 
 class NewConnection(Message):
     """
@@ -116,16 +121,20 @@ class TUI(App):
         self.send_to_server = None
 
     def compose(self) -> ComposeResult:
-        yield VerticalScroll(Panel(id='reverseproxy-log'), id='tui')
+        yield RichLog(id='reverseproxy-log')
+        yield VerticalScroll(id='tui')
 
     def on_mount(self) -> None:
-        reverseproxy_log = self.query_one('#reverseproxy-log', Panel)
-        logging.getLogger('reverseproxy').addHandler(LogHandler(reverseproxy_log))
+        log_handler = LogHandler(self)
+        logging.getLogger('reverseproxy').addHandler(log_handler)
         logging.getLogger('reverseproxy').setLevel(logging.DEBUG)
 
         self.run_worker(run_reverseproxy(self.ui_callback, self.register_callback))
 
     # ─── Input / Output Event Handler ─────────────────────────────────────────────────────────────────────────────────
+
+    def on_log_message(self, message: LogMessage) -> None:
+        self.query_one('#reverseproxy-log', RichLog).write(message.message) # LOL at message.message
 
     def on_new_connection(self, message: NewConnection) -> None:
         # Get IP and Port for readability purposes
@@ -158,7 +167,7 @@ class TUI(App):
         client = row.query_one('#client', Panel)
         client.add_log(f"Sends: {message.message}") # LOL at message.message
 
-    def on_server_to_client(self, message: ClientToServer) -> None:
+    def on_server_to_client(self, message: ServerToClient) -> None:
         # Get the Client <-> Server Row that this Server belongs to (done, by looking up `connection_id`)
         row = self.query_one(f"#connection-{str(message.connection_id)}", ClientServerRow)
 
@@ -210,15 +219,5 @@ class TUI(App):
             case 'server_log':
                 self.post_message(ServerLog(connection_id, *args))
 
-    def server_log(self, connection_id: int, message: str) -> None:
-        row = self.query_one(f"#connection-{str(connection_id)}", ClientServerRow)
-        server = row.query_one('#server', Panel)
-
-        server.add_log(message)
-
-    def delete_connection(self, connection_id: int) -> None:
-        row = self.query_one(f"#connection-{str(connection_id)}", ClientServerRow)
-
-        row.remove()
 
 TUI().run()
