@@ -6,9 +6,10 @@ import docker
 
 docker_client = docker.from_env()
 sessions = {}
-lock = asyncio.Lock()
+locks = {}
 
 def graceful_shutdown(signum, frame):
+    logger.debug(f"Signal: {signum}, Frame: {frame}")
     logger.info("Reverseproxy fährt herunter. Stoppe und lösche alle Docker-Container")
     for _uuid, container in sessions.items():
         logger.debug(f"Stoppe Container für Seesion {_uuid}")
@@ -77,15 +78,41 @@ async def client_connected_cb(browser_reader, browser_writer):
     browser_uuid = re.search(rb"Cookie:.*uuid=([a-f0-9-]+).*\r\n", browser_request)
     browser_uuid = browser_uuid.group(1).decode() if browser_uuid else None
 
+    # Edge-Case: Es können zwei verschiedene Browser, mit browser_uuid == None einen *falschen* Docker-Container zugewiesen bekommen
+    if browser_uuid is None:
+        # Daher wird dieser Fall frühzeitig verlassen. Dem Browser wird eine UUID zugewiesen und aufgefordert es erneut zu versuchen
+        await reply_with_new_uuid(browser_writer)
+        browser_writer.close()
+        return
+
+    # Existiert bereits ein Lock für diesen UUID?
+    if browser_uuid not in locks:
+        # Falls nein, dann erstelle eins
+        locks[browser_uuid] = asyncio.Lock()
+
     # Ist es eine gültige UUID?
+    old_uuid = browser_uuid
     if browser_uuid in sessions:
         # Falls ja, dann existiert hierfür schon ein Docker-Container
         docker_container = sessions[browser_uuid]
     else:
         # Falls nein, dann muss eine neue UUID und ein Docker-Container erstellt werden
-        browser_uuid = await reply_with_new_uuid(browser_writer)
-        docker_container = await run_new_docker_container('my-villas-image')
-        sessions[browser_uuid] = docker_container
+        # Jedoch kann hier eine Racing-Condition entstehen, wenn ein Browser zwei Requests *zu schnell* hintereinanderschickt
+        # Die Racing-Condition führt dazu, dass zwei oder sogar mehr Docker-Container für einen Browser erstellt werden
+        # Dadurch können mehrere Docker-Container entstehen, die verwaisen
+        # Zur Auflösung der Racing-Condition wird hier für die Cookie-UUID ein Lock erstellt
+        # Innerhalb des gelockten Bereichs wird geprüft, ob nicht schon eine vorausgehende TCP-Verbindung vom selben Browser bereits einen Docker-Container erstellt hat
+        # Wenn ein Docker-Container für diesen Browser bereits erstellt worden ist, dann gilt: old_uuid != browser_uuid
+        async with locks[browser_uuid]:
+            if old_uuid == browser_uuid:
+                # Es wurde für diesen Browser noch kein Docker-Container erstellt
+                browser_uuid = await reply_with_new_uuid(browser_writer)
+                docker_container = await run_new_docker_container('my-villas-image')
+                sessions[browser_uuid] = docker_container
+            else:
+                # Es wurde für diesen Browser bereits ein Docker-Container erstellt
+                docker_container = sessions[browser_uuid]
+            locks.pop(old_uuid)
 
     # Ist der Docker-Container bereit?
     loop = asyncio.get_running_loop()
