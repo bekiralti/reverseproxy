@@ -1,11 +1,22 @@
 # Standard Libraries
-import asyncio, functools, logging, os, re, uuid
+import asyncio, functools, logging, os, re, signal, sys, uuid
 
 # 3rd Party Libraries
 import docker
 
 docker_client = docker.from_env()
 sessions = {}
+lock = asyncio.Lock()
+
+def graceful_shutdown(signum, frame):
+    logger.info("Reverseproxy fährt herunter. Stoppe und lösche alle Docker-Container")
+    for _uuid, container in sessions.items():
+        logger.debug(f"Stoppe Container für Seesion {_uuid}")
+        container.stop()
+        logger.debug(f"Lösche Container für Seesion {_uuid}")
+        container.remove()
+    logger.info("Danke und bis bald! :)")
+    sys.exit(0)
 
 async def reply_with_new_uuid(writer):
     """Gebe dem Browser ein neues UUID-Cookie und sage ihm, dass er es gleich noch einmal versuchen soll"""
@@ -22,10 +33,11 @@ async def reply_with_new_uuid(writer):
         "  </head>"
         "</html>").encode()
     )
+    await writer.drain()
     return _uuid
 
 async def run_new_docker_container(image):
-    """Starte einen neuen VILLAScnof Docker-Container"""
+    """Starte einen neuen VILLASconf Docker-Container"""
     loop = asyncio.get_running_loop()
     logger.debug('Starte Docker-Container')
     docker_container = await loop.run_in_executor(None, functools.partial(   # run_in_executor() only allows args. To allow kwargs we use functools.partial()
@@ -50,8 +62,7 @@ async def forward_message(reader, writer):
         writer.write(message)
         await writer.drain()
 
-    # If Client closes connection, then writer.close() closes the Server connection
-    # If Server closes connection, then writer.close() closes the Client connection
+    # If Client (Server) closes connection, then writer.close() closes the Server (Client) connection
     writer.close()
     await writer.wait_closed()
 
@@ -64,20 +75,17 @@ async def client_connected_cb(browser_reader, browser_writer):
 
     # Lese die UUID aus dem Cookie Feld
     browser_uuid = re.search(rb"Cookie:.*uuid=([a-f0-9-]+).*\r\n", browser_request)
-    logger.debug(f'Match: {browser_uuid}')
     browser_uuid = browser_uuid.group(1).decode() if browser_uuid else None
-    logger.debug(f'UUID: {browser_uuid}')
 
-    # Ist dies eine gültige UUID?
-    if (browser_uuid is None) or (browser_uuid not in sessions):
-        # Falls nein, dann erstelle eine neue UUID-Cookie und VILLASconf Docker-Container für diesen Browser
+    # Ist es eine gültige UUID?
+    if browser_uuid in sessions:
+        # Falls ja, dann existiert hierfür schon ein Docker-Container
+        docker_container = sessions[browser_uuid]
+    else:
+        # Falls nein, dann muss eine neue UUID und ein Docker-Container erstellt werden
         browser_uuid = await reply_with_new_uuid(browser_writer)
         docker_container = await run_new_docker_container('my-villas-image')
         sessions[browser_uuid] = docker_container
-        await browser_writer.drain()
-        browser_writer.close()
-        return
-    docker_container = sessions[browser_uuid]
 
     # Ist der Docker-Container bereit?
     loop = asyncio.get_running_loop()
@@ -96,10 +104,10 @@ async def client_connected_cb(browser_reader, browser_writer):
             "</html>").encode()
         )
         await browser_writer.drain()
-        browser_writer.close() # Der Browser soll gleich einfach noch eine Anfrage schicken, daher hier schon .close()
+        browser_writer.close()
         return
 
-    # TCP-Verbindung zum Docker-Container aufbauen
+    # TCP-Verbindung zum entsprechenden Docker-Container aufbauen
     port = docker_container.ports['1880/tcp'][0]['HostPort'] # e.g. ports = {'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32778'}, {'HostIp': '::', 'HostPort': '32778'}]}
     docker_reader, docker_writer = await asyncio.open_connection('localhost', port)
 
@@ -114,6 +122,7 @@ async def client_connected_cb(browser_reader, browser_writer):
 
 async def main():
     """Actually serves as a wrapper for asyncio.run(). Other solutions exist, but this seems to be straightforward"""
+    signal.signal(signal.SIGINT, graceful_shutdown)
     server = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1024)
     async with server:
         await server.serve_forever()
