@@ -1,180 +1,203 @@
 # Standard Libraries
-import asyncio, functools, logging, os, re, signal, shutil, sys, uuid
+import asyncio, logging, os, re, signal, shutil, sys, uuid
+from asyncio import StreamReader
+from typing import cast, Literal
 
 # 3rd Party Libraries
 import docker
 
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
+
+# Global variables
 docker_client = docker.from_env()
 sessions = {}
 invalid_sessions = set()
 
-def graceful_shutdown(signum, frame):
+def shutdown_gracefully(signum, frame):
     logger.debug(f"Signal: {signum}, Frame: {frame}")
-    logger.info("Reverseproxy fährt herunter. Stoppe und lösche alle Docker-Container")
-    for _uuid, container in sessions.items():
-        logger.debug(f"Stoppe Container für Seesion {_uuid}")
+    logger.debug("Reverse-proxy fährt herunter")
+    for browser_uuid, container in sessions.items():
+        logger.debug(f"Stoppe und lösche Docker-Container und den zugehörigen Daten-Ordner für UUID: {browser_uuid}")
         container.stop()
-        logger.debug(f"Lösche Container für Seesion {_uuid}")
         container.remove()
-        shutil.rmtree(os.path.abspath(f'../docker/data-{_uuid}'))
+        shutil.rmtree(os.path.abspath(f'../docker/data-{browser_uuid}'))
     logger.info("Danke und bis bald! :)")
     sys.exit(0)
 
-def try_again(writer, _uuid=None):
-    """A *try-again* message to send to the Browser"""
-    if _uuid:
+def try_again(writer, browser_uuid=None):
+    if browser_uuid:
         writer.write((
             "HTTP/1.1 200 OK\r\n"
-            f"Set-Cookie: uuid={_uuid}\r\n"
-            "Content-Type: text/html\r\n"
-            "\r\n"
-            "<html>"
-            "  <head>"
-            "    <meta http-equiv='refresh' content='1'>"
-            "  </head>"
-            "</html>").encode()
+            f"Set-Cookie: uuid={browser_uuid}\r\n"
+            "Refresh: 1\r\n"
+            "\r\n").encode()
         )
     else:
         # UUID is None
         writer.write((
             "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "\r\n"
-            "<html>"
-            "  <head>"
-            "    <meta http-equiv='refresh' content='1'>"
-            "  </head>"
-            "</html>").encode()
+            "Refresh: 1\r\n"
+            "\r\n").encode()
         )
 
-async def forward_message(reader, writer):
-    while True:
-        message = await reader.read(4096) # 4 KiB, willkürlich gewählt.
+async def validate_uuid(browser_uuid):
+    """Returns a tuple `(browser_uuid, docker_container)`.
 
-        # An *empty* message signals that the connection has been closed (either intentionally or unintentionally)
-        if not message:
-            break
+    If a Docker-Container exists for the provided `browser_uuid`,
+    then the Docker-Container is returned. Value of `browser_uuid` is not changed: `(browser_uuid, docker_container)`.
 
-        # Forward message
-        writer.write(message)
-        await writer.drain()
+    If a Docker-Container doesn't exist for the provided `browser_uuid`,
+    then a new `browser_uuid` is returned: `(browser_uuid, None)`.
 
-    # If Client (Server) closes connection, then writer.close() closes the Server (Client) connection
-    writer.close()
-    await writer.wait_closed()
+    If two or more requests from the same Browser (same `browser_uuid`) arrive,
+    then the duplicates return: (None, None)
+    """
+
+    if browser_uuid in sessions:
+        # Ja, wird oder wurde für diese UUID ein Docker-Container erstellt?
+        task = sessions[browser_uuid]
+        if asyncio.isfuture(task):
+            # A Docker-Container task was scheduled, it just needs to be awaited
+            return browser_uuid, await task
+        else:
+            # Docker-Container is already ready (thus it does not need to be awaited)
+            return browser_uuid, task
+    elif browser_uuid not in invalid_sessions:
+        # Nein, falls für diese UUID noch keine Container Erstellung in Auftrag gegeben wurde, dann tue dies jetzt
+        invalid_sessions.add(browser_uuid)  # Blockiere andere Requests mit derselben UUID, damit keine doppelten Container erstellt werden!
+        old_uuid = browser_uuid             # Um es später aus `invalid_sessions` entfernen zu können
+
+        # Erstelle eine neue frische UUID
+        browser_uuid = str(uuid.uuid4())
+        os.makedirs(os.path.abspath(f"../docker/data-{browser_uuid}"))  # Each Browser gets its own *save-state*
+
+        # Creating a Coroutine for the `docker run` command, because it is IO-bound
+        coroutine = asyncio.to_thread(
+            docker_client.containers.run,
+            'my-villas-image',
+            detach=cast(Literal[True], True),                                                             # -d, `cast(Literal[True], True)` instead of simply `True` just to calm down PyCharm
+            ports={'1880/tcp': 0},                                                                        # -p 0:1880 (0 lets the kernel choose a free port)
+            volumes={os.path.abspath(f"../docker/data-{browser_uuid}"): {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
+        )
+
+        # Scheduling the Coroutine as a Task (otherwise the Coroutine will be never ever executed)
+        task = asyncio.create_task(coroutine)
+
+        # Notification for every other request with the same UUID that the container creation is scheduled (see if-case)
+        sessions[browser_uuid] = task
+
+        # Since we added the new *valid* UUID into the global sessions dictionary, we can now safely remove the blockade
+        invalid_sessions.remove(old_uuid)
+        return browser_uuid, None
+    else:
+        # Diese UUID ist geblockt. Der Browser soll es nochmal mit der UUID, die es aus dem elif-Zweig bekommt versuchen
+        return None, None
+
+def read_uuid(http_request):
+    """Returns the UUID value. Returns `None` if no `uuid` Cookie is received."""
+
+    browser_uuid = re.search(rb"uuid=([a-f0-9-]+).*\r\n", http_request)
+    return browser_uuid.group(1).decode() if browser_uuid else None
+
+# The type hint `-> bytes | None` is there just to calm down PyCharm. While at it, I also added the other type hints
+async def read_http_request(reader: StreamReader, timeout: float | None = 10) -> bytes | None:
+    """Returns the HTTP-Request. Returns `None` if no message is received after `timeout` seconds."""
+
+    # Timeout for when someone connects and doesn't send an *HTTP-Request*
+    try:
+        # HTTP-Request and HTTP-Body are separated by a blank line
+        return await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=timeout)
+    except TimeoutError:
+        return None
 
 async def client_connected_cb(browser_reader, browser_writer):
-    """This function is called whenever a TCP-Connection to port 1024 has been successfully established"""
-
-    # HTTP-Request and HTTP-Body are seperated by a double newline, aka \r\n\r\n
-    browser_request = await browser_reader.readuntil(b"\r\n\r\n")
+    # Read HTTP-Request
+    if (browser_request := await read_http_request(browser_reader)) is None:
+        logger.debug("Der Browser hat zu lange gebraucht um eine HTTP-Anfrage zu senden!")
+        browser_writer.close()
+        await browser_writer.wait_closed()
+        return
     logger.debug(f"HTTP-Request: {browser_request}")
 
-    # Lese die UUID aus dem Cookie Feld
-    browser_uuid = re.search(rb"Cookie:.*uuid=([a-f0-9-]+).*\r\n", browser_request)
-    browser_uuid = browser_uuid.group(1).decode() if browser_uuid else None
+    # Read UUID from the HTTP-Request
+    browser_uuid = read_uuid(browser_request)
 
-    loop = asyncio.get_running_loop()
-
-    # Ist es eine gültige UUID?
-    if browser_uuid in sessions:
-        # Falls ja, dann wurde (oder wird) für diese UUID ein Docker-Container erstellt?
-        future = sessions[browser_uuid]
-        if asyncio.isfuture(future):
-            # Falls der Docker-Container erstellt wird, dann warte bis das Ergebnis verfügbar ist
-            docker_container = await future
-        else:
-            # Falls der Docker-Container erstellt wurde, dann übernimm es einfach
-            docker_container = future # Hinweis: Docker-Container sind nicht awaitable
-    elif browser_uuid not in invalid_sessions:
-        # Falls nein und falls diese UUID nicht bereits *durch einen anderen Request* bearbeitet wird
-        invalid_sessions.add(browser_uuid) # *Blockiere* andere Requests mit derselben UUID, damit keine doppelten Docker-Container erstellt werden!
-        old_uuid = browser_uuid            # Um es später aus `invalid_sessions` entfernen zu können
-
-        # Erstelle eine neue UUID
-        browser_uuid = str(uuid.uuid4())
-
-        # Markiere, dass für diese UUID ein Docker-Container erstellt werden wird (s. if-Zweig)
-        future = loop.create_future()
-        sessions[browser_uuid] = future
-
-        # Gib dem Browser bescheid, dass eine neue UUID zugewiesen wurde und er es gleich noch mal versuchen soll
+    # Existiert ein Container für diese UUID oder muss ein neues erstellt werden?
+    browser_uuid, docker_container = await validate_uuid(browser_uuid)
+    if browser_uuid and (docker_container is None):
+        # Es muss ein neues erstellt werden. Der Browser soll es mit der neuen UUID nochmal versuchen
         try_again(browser_writer, browser_uuid)
         await browser_writer.drain()
         browser_writer.close()
         await browser_writer.wait_closed()
-
-        # Erstelle für diesen Browser einen Docker-Container
-        os.makedirs(os.path.abspath(f"../docker/data-{browser_uuid}")) # Each Browser gets his own save-state
-        try:
-            docker_container = await loop.run_in_executor(None, functools.partial(                    # run_in_executor() only allows args. To allow kwargs we use functools.partial()
-                docker_client.containers.run,                                                                 # type: ignore
-                'my-villas-image',
-                detach=True,                                                                                  # -d
-                ports={'1880/tcp': 0},                                                                        # -p 0:1880 (0 lets the kernel choose a free port)
-                volumes={os.path.abspath(f"../docker/data-{browser_uuid}"): {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
-            ))                                                                                                # type: ignore
-            sessions[browser_uuid] = docker_container
-            future.set_result(docker_container)  # `await`s die auf dieses Ergebnis warten (await future) werden hiermit *entblockt*
-        except Exception as e:
-            # Nur für den Fall, dass die Docker-Container erstellung fehlschlägt
-            del sessions[browser_uuid]
-            invalid_sessions.remove(old_uuid)
-            future.set_exception(e) # Setze ein Ergebnis, damit `await future` nicht *ewig* wartet
-            logger.error(f"Fehler bei Docker-Container erstellung: {e}")
-            raise
-        invalid_sessions.remove(old_uuid)
-        logger.debug('Docker-Container wurde erfolgreich erstellt')
         return
-    else:
-        # Für diesen Browser wird bereits ein Docker-Container erstellt. Dieser Browser soll sich erneut verbinden
-        try_again(browser_writer, None)
+    elif browser_uuid is None:
+        # Es wird ein neuer Docker-Container erstellt. Der Browser soll es nochmal versuchen.
+        try_again(browser_writer)
         await browser_writer.drain()
         browser_writer.close()
         await browser_writer.wait_closed()
         return
 
-    # TCP-Verbindung zum entsprechenden Docker-Container aufbauen
-    await loop.run_in_executor(None, docker_container.reload) # type: ignore
-    port = docker_container.ports['1880/tcp'][0]['HostPort'] # e.g. ports = {'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32778'}, {'HostIp': '::', 'HostPort': '32778'}]}
+    # Docker-Container Zustand aktualisieren
+    await asyncio.to_thread(docker_container.reload)  # Annahme: Eine IO-Gebundene Operation
+
+    # Vom Kernel zugewiesenen Port abrufen
+    port = docker_container.ports['1880/tcp'][0]['HostPort']  # e.g. ports = {'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32778'}, {'HostIp': '::', 'HostPort': '32778'}]}
+
+    # TCP-Verbindung zum Docker-Container aufbauen
     docker_reader, docker_writer = await asyncio.open_connection('localhost', port)
 
-    # Initialen Browser-Request an Docker-Container weiterleiten
+    # HTTP-Request des Browsers an Docker-Container weiterleiten
     docker_writer.write(browser_request)
     await docker_writer.drain()
 
-    # Initiale Antwort des Docker-Container an Browser weiterleiten
+    # HTTP-Response des Docker-Containers lesen. Hier kann festgestellt werden ob der Docker-Container schon bereit ist
     try:
-        docker_response_headers = await docker_reader.readuntil(b"\r\n\r\n")
+        # Zunächst nur HTTP-Headers lesen
+        docker_response_headers = await docker_reader.readuntil(b'\r\n\r\n')
     except asyncio.exceptions.IncompleteReadError:
         # Docker-Container war noch nicht bereit
-        try_again(browser_writer, None)
+        try_again(browser_writer)
         await browser_writer.drain()
         browser_writer.close()
         await browser_writer.wait_closed()
         return
+
+    # Mit dem Wert aus `Content-Length` kann anschließend der HTTP-Body gelesen werden
     content_length = re.search(rb"Content-Length: (\d+)", docker_response_headers)
     content_length = int(content_length.group(1)) if content_length else 0
+
+    # HTTP-Body lesen
     docker_response_body = await docker_reader.readexactly(content_length)
+
+    # Die Antwort des Docker-Containers (HTTP-Response) an den Browser weiterleiten
     browser_writer.write(docker_response_headers + docker_response_body)
     await browser_writer.drain()
 
     # Message forwarding
-    logger.debug('Beginn Message-Forwarding')
+    async def forward_message(reader, writer):
+        while True:
+            message = await reader.read(4096)  # 4 KiB ist willkürlich gewählt
+            if not message:
+                # An *empty* message means disconnect
+                break
+            writer.write(message)
+            await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
     await asyncio.gather(
         forward_message(browser_reader, docker_writer),
         forward_message(docker_reader, browser_writer)
     )
-    logger.debug('Ende Message-Forwarding')
 
 async def main():
-    """Actually serves as a wrapper for asyncio.run(). Other solutions exist, but this seems to be straightforward"""
-    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signal.SIGINT, shutdown_gracefully)
     server = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1024)
     async with server:
         await server.serve_forever()
 
-if __name__ == '__main__':
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
-    asyncio.run(main(), debug=True)
+asyncio.run(main(), debug=True)
