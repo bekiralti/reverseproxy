@@ -18,172 +18,187 @@ invalid_sessions = set()
 def shutdown_gracefully(signum, frame):
     logger.debug(f"Signal: {signum}, Frame: {frame}")
     logger.debug("Reverse-proxy fährt herunter")
-    for browser_uuid, container in sessions.items():
-        logger.debug(f"Stoppe und lösche Docker-Container und den zugehörigen Daten-Ordner für UUID: {browser_uuid}")
+    for uuid4, container in sessions.items():
+        logger.debug(f"Stoppe und lösche Docker-Container {container} und lösche den zugehörigen Ordner für UUID4: {uuid4}")
         container.stop()
         container.remove()
-        shutil.rmtree(os.path.abspath(f'../docker/data-{browser_uuid}'))
+        shutil.rmtree(os.path.abspath(f'../docker/data-{uuid4}'))
     logger.info("Danke und bis bald! :)")
     sys.exit(0)
 
-def try_again(writer, browser_uuid=None):
-    if browser_uuid:
+def try_again(writer, browser_uuid4=None):
+    if browser_uuid4:
         writer.write((
             "HTTP/1.1 200 OK\r\n"
-            f"Set-Cookie: uuid={browser_uuid}\r\n"
-            "Refresh: 1\r\n"
+            f"Set-Cookie: uuid4={browser_uuid4}\r\n"
+            "Refresh: 5\r\n"
             "\r\n").encode()
         )
     else:
         # UUID is None
         writer.write((
             "HTTP/1.1 200 OK\r\n"
-            "Refresh: 1\r\n"
+            "Refresh: 5\r\n"
             "\r\n").encode()
         )
 
-async def validate_uuid(browser_uuid):
-    """Returns a tuple `(browser_uuid, docker_container)`.
+async def resolve_uuid4(uuid4):
+    """Returns a tuple: `(uuid4, docker_container)`
 
-    If a Docker-Container exists for the provided `browser_uuid`,
-    then the Docker-Container is returned. Value of `browser_uuid` is not changed: `(browser_uuid, docker_container)`.
+    If a Docker-Container exists for the provided `uuid4`,
+    then the Docker-Container is returned. Value of `uuid4` is not changed: `(uuid4, docker_container)`.
 
-    If a Docker-Container doesn't exist for the provided `browser_uuid`,
-    then a new `browser_uuid` is returned: `(browser_uuid, None)`.
+    If a Docker-Container doesn't exist for the provided `uuid4`,
+    then a new `uuid4` is returned: `(uuid4, None)`.
 
-    If two or more requests from the same Browser (same `browser_uuid`) arrive,
-    then the duplicates return: (None, None)
+    If two or more requests from the same Browser (same `uuid4`) arrive,
+    then the duplicate requests return: `(None, None)`
     """
 
-    if browser_uuid in sessions:
+    # Ist die mitgegebene UUID (`uuid4`) *gültig*?
+    if uuid4 in sessions:
         # Ja, wird oder wurde für diese UUID ein Docker-Container erstellt?
-        task = sessions[browser_uuid]
+        task = sessions[uuid4]
         if asyncio.isfuture(task):
-            # A Docker-Container task was scheduled, it just needs to be awaited
-            return browser_uuid, await task
+            # Case: Docker-Container task was scheduled, it just needs to be awaited
+            sessions[uuid4] = await task  # *Replace* the Task object with the actual (awaited) Docker-Container
+
+            return uuid4, sessions[uuid4]
         else:
-            # Docker-Container is already ready (thus it does not need to be awaited)
-            return browser_uuid, task
-    elif browser_uuid not in invalid_sessions:
-        # Nein, falls für diese UUID noch keine Container Erstellung in Auftrag gegeben wurde, dann tue dies jetzt
-        invalid_sessions.add(browser_uuid)  # Blockiere andere Requests mit derselben UUID, damit keine doppelten Container erstellt werden!
-        old_uuid = browser_uuid             # Um es später aus `invalid_sessions` entfernen zu können
+            # Case: Docker-Container is already ready (thus it does not need to be awaited)
+            return uuid4, task
+    elif uuid4 not in invalid_sessions:
+        # Nein, falls für diese UUID4 noch keine Container Erstellung in Auftrag gegeben wurde, dann tue dies jetzt
+        invalid_sessions.add(uuid4)  # Blockiere Requests mit derselben UUID, sonst werden doppelten Container erstellt!
+        old_uuid4 = uuid4            # Um es später aus `invalid_sessions` entfernen zu können
 
         # Erstelle eine neue frische UUID
-        browser_uuid = str(uuid.uuid4())
-        os.makedirs(os.path.abspath(f"../docker/data-{browser_uuid}"))  # Each Browser gets its own *save-state*
+        uuid4 = str(uuid.uuid4())
+        os.makedirs(os.path.abspath(f"../docker/data-{uuid4}"))  # Each Browser gets its own *save-state*
 
         # Creating a Coroutine for the `docker run` command, because it is IO-bound
         coroutine = asyncio.to_thread(
             docker_client.containers.run,
             'my-villas-image',
-            detach=cast(Literal[True], True),                                                             # -d, `cast(Literal[True], True)` instead of simply `True` just to calm down PyCharm
-            ports={'1880/tcp': 0},                                                                        # -p 0:1880 (0 lets the kernel choose a free port)
-            volumes={os.path.abspath(f"../docker/data-{browser_uuid}"): {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
+            detach=cast(Literal[True], True),                                                      # -d, `cast(Literal[True], True)` instead of simply `True` just to calm down PyCharm
+            ports={'1880/tcp': 0},                                                                 # -p 0:1880 (0 lets the kernel choose a free port)
+            volumes={os.path.abspath(f"../docker/data-{uuid4}"): {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
         )
 
         # Scheduling the Coroutine as a Task (otherwise the Coroutine will be never ever executed)
         task = asyncio.create_task(coroutine)
 
         # Notification for every other request with the same UUID that the container creation is scheduled (see if-case)
-        sessions[browser_uuid] = task
+        sessions[uuid4] = task
 
         # Since we added the new *valid* UUID into the global sessions dictionary, we can now safely remove the blockade
-        invalid_sessions.remove(old_uuid)
-        return browser_uuid, None
+        invalid_sessions.remove(old_uuid4)
+
+        return uuid4, None
     else:
-        # Diese UUID ist geblockt. Der Browser soll es nochmal mit der UUID, die es aus dem elif-Zweig bekommt versuchen
+        # Für diese UUID wurde eine Containererstellung in Auftrag gegeben, daher ist diese UUID vorerst geblockt.
         return None, None
 
-def read_uuid(http_request):
-    """Returns the UUID value. Returns `None` if no `uuid` Cookie is received."""
+def parse_uuid4(text):
+    """Returns the UUID4 value for the given input (`text`). Returns `None` if no valid UUID4 exists in `text`."""
 
-    browser_uuid = re.search(rb"uuid=([a-f0-9-]+).*\r\n", http_request)
-    return browser_uuid.group(1).decode() if browser_uuid else None
+    # Source for the UUID4 regex: https://stackoverflow.com/a/18516125
+    uuid4 = re.search(
+        rb"uuid4=([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})",
+        text
+    )
 
-# The type hint `-> bytes | None` is there just to calm down PyCharm. While at it, I also added the other type hints
-async def read_http_request(reader: StreamReader, timeout: float | None = 10) -> bytes | None:
-    """Returns the HTTP-Request. Returns `None` if no message is received after `timeout` seconds."""
+    return uuid4.group(1).decode() if uuid4 else None
+
+# I initially added the type-hints to calm down PyCharm. They changed. I don't know if they are still necessary.
+async def read_http_request_and_body(
+        reader: StreamReader,
+        timeout: float | None = 10
+) -> tuple[bytes, bytes]:
+    """Returns a tuple: `(http_request, http_body)`.
+
+    Returns `(http_request, b'')` if no `Content-Length` is specified.
+
+    Returns the tuple `(b'', b'')` if no message is received after `timeout` seconds.
+    """
 
     # Timeout for when someone connects and doesn't send an *HTTP-Request*
     try:
         # HTTP-Request and HTTP-Body are separated by a blank line
-        return await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=timeout)
+        http_request = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=timeout)
     except TimeoutError:
-        return None
+        return b'', b''
+
+    # Based on Content-Length, read the HTTP-Body
+    content_length = re.search(
+        rb"Content-Length: (\d+)",  # HTTP-Headers are case-insensitive (see RFC 9110)
+        http_request,
+        re.IGNORECASE
+    )
+    content_length = int(content_length.group(1)) if content_length else 0
+    http_body = await reader.readexactly(content_length)
+
+    return http_request, http_body
 
 async def client_connected_cb(browser_reader, browser_writer):
-    # Read HTTP-Request
-    if (browser_request := await read_http_request(browser_reader)) is None:
+    # Read HTTP-Request, HTTP-Body and UUID (set by this reverse-proxy after the initial HTTP-Request)
+    browser_http_request, browser_http_body = await read_http_request_and_body(browser_reader)
+    logger.debug(browser_http_request)
+    logger.debug(browser_http_body)
+    if (browser_http_request == b'') and (browser_http_body == b''):
         logger.debug("Der Browser hat zu lange gebraucht um eine HTTP-Anfrage zu senden!")
         browser_writer.close()
         await browser_writer.wait_closed()
         return
-    logger.debug(f"HTTP-Request: {browser_request}")
+    browser_uuid4 = parse_uuid4(browser_http_request)
 
-    # Read UUID from the HTTP-Request
-    browser_uuid = read_uuid(browser_request)
-
-    # Existiert ein Container für diese UUID oder muss ein neues erstellt werden?
-    browser_uuid, docker_container = await validate_uuid(browser_uuid)
-    if browser_uuid and (docker_container is None):
+    # Falls der Docker-Container für diese UUID noch nicht existiert, dann soll der Browser es gleich nochmal versuchen
+    browser_uuid4, docker_container = await resolve_uuid4(browser_uuid4)
+    if browser_uuid4 and (docker_container is None):
         # Es muss ein neues erstellt werden. Der Browser soll es mit der neuen UUID nochmal versuchen
-        try_again(browser_writer, browser_uuid)
+        try_again(browser_writer, browser_uuid4)
         await browser_writer.drain()
         browser_writer.close()
         await browser_writer.wait_closed()
         return
-    elif browser_uuid is None:
-        # Es wird ein neuer Docker-Container erstellt. Der Browser soll es nochmal versuchen.
+    elif browser_uuid4 is None:
+        # Es wird gerade ein neuer Docker-Container erstellt. Der Browser soll es gleich nochmal versuchen.
         try_again(browser_writer)
         await browser_writer.drain()
         browser_writer.close()
         await browser_writer.wait_closed()
         return
 
-    # Docker-Container Zustand aktualisieren
-    await asyncio.to_thread(docker_container.reload)  # Annahme: Eine IO-Gebundene Operation
-
-    # Vom Kernel zugewiesenen Port abrufen
+    # Docker-Container Zustand aktualisieren und den vom Kernel zugewiesenen Port abrufen
+    await asyncio.to_thread(docker_container.reload)          # Annahme: `reload()` ist eine IO-Gebundene Operation
     port = docker_container.ports['1880/tcp'][0]['HostPort']  # e.g. ports = {'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32778'}, {'HostIp': '::', 'HostPort': '32778'}]}
 
-    # TCP-Verbindung zum Docker-Container aufbauen
+    # TCP-Verbindung zum Docker-Container aufbauen und HTTP-Request des Browsers weiterleiten
     docker_reader, docker_writer = await asyncio.open_connection('localhost', port)
-
-    # HTTP-Request des Browsers an Docker-Container weiterleiten
-    docker_writer.write(browser_request)
+    docker_writer.write(browser_http_request + browser_http_body)
     await docker_writer.drain()
 
     # HTTP-Response des Docker-Containers lesen. Hier kann festgestellt werden ob der Docker-Container schon bereit ist
     try:
-        # Zunächst nur HTTP-Headers lesen
-        docker_response_headers = await docker_reader.readuntil(b'\r\n\r\n')
+        docker_http_headers, docker_http_body = await read_http_request_and_body(docker_reader)
     except asyncio.exceptions.IncompleteReadError:
-        # Docker-Container war noch nicht bereit
+        logger.debug("Docker-Container ist noch nicht bereit. Der Browser wird benachrichtigt es nochmal zu versuchen")
         try_again(browser_writer)
         await browser_writer.drain()
         browser_writer.close()
         await browser_writer.wait_closed()
         return
 
-    # Mit dem Wert aus `Content-Length` kann anschließend der HTTP-Body gelesen werden
-    content_length = re.search(rb"Content-Length: (\d+)", docker_response_headers)
-    content_length = int(content_length.group(1)) if content_length else 0
-
-    # HTTP-Body lesen
-    docker_response_body = await docker_reader.readexactly(content_length)
-
-    # Die Antwort des Docker-Containers (HTTP-Response) an den Browser weiterleiten
-    browser_writer.write(docker_response_headers + docker_response_body)
+    # HTTP-Response (des Docker-Containers) an den Browser weiterleiten
+    browser_writer.write(docker_http_headers + docker_http_body)
     await browser_writer.drain()
 
-    # Message forwarding
+    # Actual message forwarding. I placed the function here because aesthetically it suits here better than outside
     async def forward_message(reader, writer):
         while True:
             message = await reader.read(4096)  # 4 KiB ist willkürlich gewählt
             if not message:
-                # An *empty* message means disconnect
-                break
+                break  # An *empty* message means disconnect
             writer.write(message)
             await writer.drain()
         writer.close()
