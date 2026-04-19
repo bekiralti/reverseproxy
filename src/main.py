@@ -40,7 +40,7 @@ def shutdown_gracefully(signum, frame):
 # Alternativ: Inaktive Container nicht über Polling, sondern über WebSocket-Close-Codes erkennen. Oder beides.
 async def poll_sessions():
     while True:
-        for uuid4, session in sessions.items():
+        for uuid4, session in list(sessions.items()):
             elapsed_time = time.time() - session.last_seen
             if elapsed_time > 60:
                 session.docker_container.stop()
