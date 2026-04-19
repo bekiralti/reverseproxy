@@ -16,15 +16,16 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 
-@dataclass
-class Session:
-    docker_container: Container | Task
-    last_seen: float
-
 # Globale Variablen
 docker_client = docker.from_env()
 sessions = {}
 invalid_sessions = set()
+ui_callback = lambda **kwargs: None  # ui_callback = None leads to a false warning which I couldn't properly resolve
+
+@dataclass
+class Session:
+    docker_container: Container | Task
+    last_seen: float
 
 def shutdown_gracefully(signum, frame):
     logger.debug(f"Signal: {signum}, Frame: {frame}")
@@ -46,6 +47,11 @@ async def poll_sessions():
                 session.docker_container.stop()
                 session.docker_container.remove()
                 shutil.rmtree(os.path.abspath(f'../docker/data-{uuid4}'))
+
+                # Inform the UI that this Docker-Container has been deleted
+                if callable(ui_callback):
+                    ui_callback(event='container_deleted', uuid4=uuid4)
+
                 del sessions[uuid4]
         await asyncio.sleep(60)  # Polling every 1 minute (60 seconds). Node-RED heartbeat happens every ~15 seconds
 
@@ -133,7 +139,7 @@ def parse_uuid4(text):
 
     return uuid4.group(1).decode() if uuid4 else None
 
-# I initially added the type-hints to calm down PyCharm. They changed. I don't know if they are still necessary.
+# Initially added these type-hints to calm down PyCharm. Meanwhile, code changed. Not sure if they are still necessary.
 async def read_http_request_and_body(
         reader: StreamReader,
         timeout: float | None = 10
@@ -148,7 +154,7 @@ async def read_http_request_and_body(
     # Timeout for when someone connects and doesn't send an *HTTP-Request*
     try:
         # HTTP-Request and HTTP-Body are separated by a blank line
-        http_request = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=timeout)
+        http_request = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), timeout=timeout)
     except TimeoutError:
         return b'', b''
 
@@ -175,6 +181,11 @@ async def client_connected_cb(browser_reader, browser_writer):
         return
     session_uuid4 = parse_uuid4(browser_http_request)
 
+    # Inform the UI that a Browser connected
+    if callable(ui_callback):
+        ip, port = browser_writer.get_extra_info('peername')
+        ui_callback(event='browser_connected', uuid4=session_uuid4, ip=ip, port=port)
+
     # Falls der Docker-Container für diese UUID noch nicht existiert, dann soll der Browser es gleich nochmal versuchen
     session_uuid4, docker_container = await resolve_uuid4(session_uuid4)
     if session_uuid4 and (docker_container is None):
@@ -192,6 +203,10 @@ async def client_connected_cb(browser_reader, browser_writer):
         await browser_writer.wait_closed()
         return
 
+    # Inform the UI that the Docker-Container for `session_uuid4` has been created
+    if callable(ui_callback):
+        ui_callback(event='container_created', uuid4=session_uuid4, id=docker_container.short_id)
+
     # Docker-Container Zustand aktualisieren und den vom Kernel zugewiesenen Port abrufen
     await asyncio.to_thread(docker_container.reload)          # Annahme: `reload()` ist eine IO-Gebundene Operation
     port = docker_container.ports['1880/tcp'][0]['HostPort']  # e.g. ports = {'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32778'}, {'HostIp': '::', 'HostPort': '32778'}]}
@@ -200,6 +215,10 @@ async def client_connected_cb(browser_reader, browser_writer):
     docker_reader, docker_writer = await asyncio.open_connection('localhost', port)
     docker_writer.write(browser_http_request + browser_http_body)
     await docker_writer.drain()
+
+    # Inform the UI that a connection to the Docker-Container has been established
+    if callable(ui_callback):
+        ui_callback(event='docker_connected', uuid4=session_uuid4, port=port, id=docker_container.short_id)
 
     # HTTP-Response des Docker-Containers lesen. Hier kann festgestellt werden ob der Docker-Container schon bereit ist
     try:
@@ -215,6 +234,10 @@ async def client_connected_cb(browser_reader, browser_writer):
     # HTTP-Response des Docker-Containers an den Browser weiterleiten
     browser_writer.write(docker_http_headers + docker_http_body)
     await browser_writer.drain()
+
+    # Inform the UI that Browser <-> Reverseproxy <-> Docker-Container connection has been fully established
+    if callable(ui_callback):
+        ui_callback(event='browser<->container', uuid4=session_uuid4)
 
     # Actual message forwarding. I placed the function here because aesthetically it suits here better than outside
     async def forward_message(reader, writer):
@@ -234,10 +257,15 @@ async def client_connected_cb(browser_reader, browser_writer):
         forward_message(docker_reader, browser_writer)
     )
 
-async def main():
+# The `port` parameter is soon going to become constant 443 for HTTPS
+async def main(callback=None, port=3000):
+    global ui_callback
+    ui_callback = callback
+
     signal.signal(signal.SIGINT, shutdown_gracefully)
-    server = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1024)
+    server = await asyncio.start_server(client_connected_cb, '0.0.0.0', port)
     async with server:
         await asyncio.gather(server.serve_forever(), poll_sessions())
 
-asyncio.run(main(), debug=True)
+if __name__ == '__main__':
+    asyncio.run(main(), debug=True)
