@@ -78,7 +78,7 @@ async def resolve_uuid4(uuid4):
     then the duplicate requests return: `(None, None)`
     """
 
-    # Ist die mitgegebene UUID (`uuid4`) *gültig*?
+    # Ist die UUID (`uuid4`) *gültig*?
     if uuid4 in sessions:
         # Ja, wird oder wurde für diese UUID bereits der Docker-Container bereitgestellt?
         task = sessions[uuid4].docker_container
