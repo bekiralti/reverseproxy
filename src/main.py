@@ -1,16 +1,27 @@
 # Standard Libraries
-import asyncio, logging, os, re, signal, shutil, sys, uuid
-from asyncio import StreamReader
+import asyncio, logging, os, re, signal, shutil, sys, time, uuid
+from asyncio import StreamReader, Task
+from dataclasses import dataclass
 from typing import cast, Literal
 
 # 3rd Party Libraries
 import docker
+from docker.models.containers import Container
 
 # Logging setup
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)-7s %(name)-12s %(message)s")
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s.%(msecs)03d %(levelname)-7s %(name)-12s %(message)s",
+    datefmt="%H:%M:%S"
+)
 
-# Global variables
+@dataclass
+class Session:
+    docker_container: Container | Task
+    last_seen: float
+
+# Globale Variablen
 docker_client = docker.from_env()
 sessions = {}
 invalid_sessions = set()
@@ -18,13 +29,25 @@ invalid_sessions = set()
 def shutdown_gracefully(signum, frame):
     logger.debug(f"Signal: {signum}, Frame: {frame}")
     logger.debug("Reverse-proxy fährt herunter")
-    for uuid4, container in sessions.items():
-        logger.debug(f"Stoppe und lösche Docker-Container {container} und lösche den zugehörigen Ordner für UUID4: {uuid4}")
-        container.stop()
-        container.remove()
+    for uuid4, session in sessions.items():
+        logger.debug(f"Stoppe und lösche Docker-Container {session.docker_container} und lösche den zugehörigen Ordner mit UUID4: {uuid4}")
+        session.docker_container.stop()
+        session.docker_container.remove()
         shutil.rmtree(os.path.abspath(f'../docker/data-{uuid4}'))
     logger.info("Danke und bis bald! :)")
     sys.exit(0)
+
+# Alternativ: Inaktive Container nicht über Polling, sondern über WebSocket-Close-Codes erkennen. Oder beides.
+async def poll_sessions():
+    while True:
+        for uuid4, session in sessions.items():
+            elapsed_time = time.time() - session.last_seen
+            if elapsed_time > 60:
+                session.docker_container.stop()
+                session.docker_container.remove()
+                shutil.rmtree(os.path.abspath(f'../docker/data-{uuid4}'))
+                del sessions[uuid4]
+        await asyncio.sleep(60)  # Polling every 1 minute (60 seconds). Node-RED heartbeat happens every ~15 seconds
 
 def try_again(writer, browser_uuid4=None):
     if browser_uuid4:
@@ -57,24 +80,24 @@ async def resolve_uuid4(uuid4):
 
     # Ist die mitgegebene UUID (`uuid4`) *gültig*?
     if uuid4 in sessions:
-        # Ja, wird oder wurde für diese UUID ein Docker-Container erstellt?
-        task = sessions[uuid4]
+        # Ja, wird oder wurde für diese UUID bereits der Docker-Container bereitgestellt?
+        task = sessions[uuid4].docker_container
         if asyncio.isfuture(task):
-            # Case: Docker-Container task was scheduled, it just needs to be awaited
-            sessions[uuid4] = await task  # *Replace* the Task object with the actual (awaited) Docker-Container
+            # Nein, aber für die Docker-Container Bereitstellung muss der `task` nur noch awaited werden
+            sessions[uuid4].docker_container = await task
 
-            return uuid4, sessions[uuid4]
+            return uuid4, sessions[uuid4].docker_container
         else:
-            # Case: Docker-Container is already ready (thus it does not need to be awaited)
+            # Ja, der Docker-Container ist bereit
             return uuid4, task
     elif uuid4 not in invalid_sessions:
         # Nein, falls für diese UUID4 noch keine Container Erstellung in Auftrag gegeben wurde, dann tue dies jetzt
-        invalid_sessions.add(uuid4)  # Blockiere Requests mit derselben UUID, sonst werden doppelten Container erstellt!
+        invalid_sessions.add(uuid4)  # Blockiere Requests mit derselben UUID, sonst werden doppelte Container erstellt!
         old_uuid4 = uuid4            # Um es später aus `invalid_sessions` entfernen zu können
 
         # Erstelle eine neue frische UUID
         uuid4 = str(uuid.uuid4())
-        os.makedirs(os.path.abspath(f"../docker/data-{uuid4}"))  # Each Browser gets its own *save-state*
+        os.makedirs(os.path.abspath(f"../docker/data-{uuid4}"))  # Each Browser has to get its own data folder, otherwise they will conflict each other!
 
         # Creating a Coroutine for the `docker run` command, because it is IO-bound
         coroutine = asyncio.to_thread(
@@ -89,7 +112,7 @@ async def resolve_uuid4(uuid4):
         task = asyncio.create_task(coroutine)
 
         # Notification for every other request with the same UUID that the container creation is scheduled (see if-case)
-        sessions[uuid4] = task
+        sessions[uuid4] = Session(docker_container=task, last_seen=time.time())
 
         # Since we added the new *valid* UUID into the global sessions dictionary, we can now safely remove the blockade
         invalid_sessions.remove(old_uuid4)
@@ -141,7 +164,7 @@ async def read_http_request_and_body(
     return http_request, http_body
 
 async def client_connected_cb(browser_reader, browser_writer):
-    # Read HTTP-Request, HTTP-Body and UUID (set by this reverse-proxy after the initial HTTP-Request)
+    # Read HTTP-Request, HTTP-Body and UUID
     browser_http_request, browser_http_body = await read_http_request_and_body(browser_reader)
     logger.debug(browser_http_request)
     logger.debug(browser_http_body)
@@ -150,18 +173,18 @@ async def client_connected_cb(browser_reader, browser_writer):
         browser_writer.close()
         await browser_writer.wait_closed()
         return
-    browser_uuid4 = parse_uuid4(browser_http_request)
+    session_uuid4 = parse_uuid4(browser_http_request)
 
     # Falls der Docker-Container für diese UUID noch nicht existiert, dann soll der Browser es gleich nochmal versuchen
-    browser_uuid4, docker_container = await resolve_uuid4(browser_uuid4)
-    if browser_uuid4 and (docker_container is None):
+    session_uuid4, docker_container = await resolve_uuid4(session_uuid4)
+    if session_uuid4 and (docker_container is None):
         # Es muss ein neues erstellt werden. Der Browser soll es mit der neuen UUID nochmal versuchen
-        try_again(browser_writer, browser_uuid4)
+        try_again(browser_writer, session_uuid4)
         await browser_writer.drain()
         browser_writer.close()
         await browser_writer.wait_closed()
         return
-    elif browser_uuid4 is None:
+    elif session_uuid4 is None:
         # Es wird gerade ein neuer Docker-Container erstellt. Der Browser soll es gleich nochmal versuchen.
         try_again(browser_writer)
         await browser_writer.drain()
@@ -196,9 +219,11 @@ async def client_connected_cb(browser_reader, browser_writer):
     # Actual message forwarding. I placed the function here because aesthetically it suits here better than outside
     async def forward_message(reader, writer):
         while True:
-            message = await reader.read(4096)  # 4 KiB ist willkürlich gewählt
+            message = await reader.read(4096)                # 4 KiB ist willkürlich gewählt
+            logger.debug(f"Forward message: {message}")
             if not message:
-                break  # An *empty* message means disconnect
+                break                                        # An *empty* message means disconnect
+            sessions[session_uuid4].last_seen = time.time()  # *Heartbeat*
             writer.write(message)
             await writer.drain()
         writer.close()
@@ -213,6 +238,6 @@ async def main():
     signal.signal(signal.SIGINT, shutdown_gracefully)
     server = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1024)
     async with server:
-        await server.serve_forever()
+        await asyncio.gather(server.serve_forever(), poll_sessions())
 
 asyncio.run(main(), debug=True)
