@@ -37,7 +37,7 @@ def shutdown_gracefully(signum, frame):
     logger.info("Danke und bis bald! :)")
     sys.exit(0)
 
-# Alternativ: Inaktive Container nicht über Polling, sondern über WebSocket-Close-Codes erkennen. Oder beides.
+# Alternativ: Inaktive Container nicht über dieses Polling, sondern über WebSocket-Close-Codes erkennen. Oder beides.
 async def poll_sessions():
     while True:
         for uuid4, session in list(sessions.items()):
@@ -154,9 +154,9 @@ async def read_http_request_and_body(
 
     # Based on Content-Length, read the HTTP-Body
     content_length = re.search(
-        rb"Content-Length: (\d+)",  # HTTP-Headers are case-insensitive (see RFC 9110)
+        rb"Content-Length: (\d+)",
         http_request,
-        re.IGNORECASE
+        re.IGNORECASE  # HTTP-Headers are case-insensitive (see RFC 9110)
     )
     content_length = int(content_length.group(1)) if content_length else 0
     http_body = await reader.readexactly(content_length)
@@ -178,7 +178,7 @@ async def client_connected_cb(browser_reader, browser_writer):
     # Falls der Docker-Container für diese UUID noch nicht existiert, dann soll der Browser es gleich nochmal versuchen
     session_uuid4, docker_container = await resolve_uuid4(session_uuid4)
     if session_uuid4 and (docker_container is None):
-        # Es muss ein neues erstellt werden. Der Browser soll es mit der neuen UUID nochmal versuchen
+        # Es muss ein neuer Docker-Container erstellt werden. Der Browser soll es mit der neuen UUID nochmal versuchen
         try_again(browser_writer, session_uuid4)
         await browser_writer.drain()
         browser_writer.close()
@@ -212,7 +212,7 @@ async def client_connected_cb(browser_reader, browser_writer):
         await browser_writer.wait_closed()
         return
 
-    # HTTP-Response (des Docker-Containers) an den Browser weiterleiten
+    # HTTP-Response des Docker-Containers an den Browser weiterleiten
     browser_writer.write(docker_http_headers + docker_http_body)
     await browser_writer.drain()
 
