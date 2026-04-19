@@ -1,0 +1,31 @@
+Screen {
+    background: $surface;
+}
+
+#reverseproxy-log {
+    background: $boost;
+    border: hkey;
+    height: 20;
+    margin-left: 2;
+    margin-right: 2;
+    margin-top: 1;
+}
+
+ClientServerRow > Panel {
+    background: $boost;
+    border: vkey;
+    height: 10;
+    margin-left: 2;
+    margin-right: 2;
+    margin-top: 1;
+    width: 1fr;
+}
+
+Panel {
+    height: 1fr;
+}
+
+Panel Input {
+    height: auto;
+    dock: bottom;
+}
