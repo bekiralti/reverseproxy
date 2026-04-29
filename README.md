@@ -27,11 +27,10 @@ Video description:
 
 **TODO: E.g. docker**
 
-# Working Example
+# Example Usage
 
 > [!NOTE]
-> For this example we will use a Node-RED Docker-Container, 
-> because it makes demonstrating the proof-of-conecpt rather easy.
+> We will use a Node-RED Docker-Container, because it makes demonstrating the proof-of-conecpt rather easy.
 
 **TODO: Example**
 
