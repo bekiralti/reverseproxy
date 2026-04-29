@@ -1,6 +1,6 @@
-# Standard Libraries (ja, man kann auch stattdessen einfach aiohttp verwenden ...)
+# Standard Libraries
 import asyncio, logging, os, re, signal, shutil, sys, time, uuid
-from asyncio import StreamReader, Task
+from asyncio import StreamReader
 from asyncio.exceptions import IncompleteReadError
 from dataclasses import dataclass
 from typing import cast, Literal
@@ -9,28 +9,27 @@ from typing import cast, Literal
 import docker
 from docker.models.containers import Container
 
-# Logging setup
-logger = logging.getLogger(__name__)
-
-# Globale Variablen
+# Global variables
 docker_client = docker.from_env()
-sessions = {}
+logger = logging.getLogger(__name__)
+sessions = {}  # Look-up-table
 
-@dataclass
+# Store necessary information for each session
+@dataclass(slots=True)
 class Session:
-    docker_container: Container | Task
+    docker_container: Container
     last_seen: float
 
 def shutdown_gracefully(signum, frame):
     logger.debug(f"Signal: {signum}, Frame: {frame}")
-    logger.debug("Reverse-proxy fährt herunter")
+    logger.debug("Reverse-proxy shuts down")
     for uuid4, session in sessions.items():
-        logger.debug(f"Stoppe und lösche Docker-Container {session.docker_container} und lösche den zugehörigen Ordner mit UUID4: {uuid4}")
+        logger.debug(f"Stop and remove Docker-Container {session.docker_container} and delete its associated data: ./docker/data-{uuid4}")
         if session.docker_container:
             session.docker_container.stop()
             session.docker_container.remove()
         shutil.rmtree(os.path.abspath(f'../docker/data-{uuid4}'))
-    logger.info("Danke und bis bald! :)")
+    logger.info("Thank you and see you soon! :)")
     sys.exit(0)
 
 # Alternativ: Inaktive Container nicht über dieses Polling, sondern über WebSocket-Close-Codes erkennen. Oder beides.
@@ -62,7 +61,7 @@ def try_again(writer, uuid4=None):
         )
 
 # Type annotation to calm down PyCharm
-async def get_or_create_container(uuid4: str) -> Container | None:
+async def get_or_create_docker_container(uuid4: str) -> Container | None:
     """Checks if a Docker-Container exists in the global `sessions` dictionary for the given `uuid4`.
 
     Returns the Docker-Container if it exists.
@@ -71,14 +70,15 @@ async def get_or_create_container(uuid4: str) -> Container | None:
     You have to *retry* with the same `uuid4` to get the created Docker-Container.
 
     TODO: A malicious client can spam randomly generated uuid4 cookies and thus create multiple Docker-Containers.
-          One solution is to also check the IP address (and maybe even Port).
+          One solution is to remember the IP address and limit the amount of Docker-Containers this IP address can spawn.
+          E.g. 1 Docker-Container every 60 seconds.
     """
 
     if uuid4 in sessions:
         session = sessions[uuid4]
     else:
         # Dummy to prevent someone who sends multiple requests with the same UUID from creating multiple containers
-        sessions[uuid4] = None
+        sessions[uuid4] = None  # Now, `uuid4 in sessions` evaluates to `True`
 
         # Each Browser has to get its own data folder, otherwise they will conflict each other!
         os.makedirs(os.path.abspath(f"../docker/data-{uuid4}"))
@@ -122,6 +122,8 @@ async def read_http_header_and_body(
     Returns `(http_header, b'')` if no `Content-Length` is specified.
 
     Returns the tuple `(b'', b'')` if no message is received after `timeout` seconds.
+
+    TODO: Eventually tighten the timeout value. Maybe 1 seconds instead of 10 seconds.
     """
 
     # Timeout for when someone connects and doesn't send an *HTTP-Request* or just blocks the line
@@ -142,71 +144,67 @@ async def read_http_header_and_body(
 
     return http_header, http_body
 
-async def reverseproxy_handler(browser_reader, browser_writer):
+async def reverseproxy_handler(client_reader, client_writer):
     # Read UUID-Cookie
-    browser_http_header, browser_http_body = await read_http_header_and_body(browser_reader)
-    logger.debug(f"HTTP-Request: {browser_http_header}")
-    logger.debug(f"HTTP-Request: {browser_http_body}")
-    if not browser_http_header and not browser_http_body:
-        logger.debug("Der Browser hat zu lange gebraucht um eine HTTP-Anfrage zu senden!")
-        browser_writer.close()
-        await browser_writer.wait_closed()
+    client_http_header, client_http_body = await read_http_header_and_body(client_reader)
+    logger.debug(f"HTTP-Request: {client_http_header}")
+    logger.debug(f"HTTP-Request: {client_http_body}")
+    if not client_http_header and not client_http_body:
+        logger.debug("The Client took too long to send an HTTP-Request!")
+        client_writer.close()
+        await client_writer.wait_closed()
         return
-    session_uuid4 = parse_uuid4(browser_http_header)
+    session_uuid4 = parse_uuid4(client_http_header)
 
     # Prevent multiple docker-container creations by someone who for example simply spams: curl my-proxy.net
     if session_uuid4 is None:
         session_uuid4 = uuid.uuid4()
-        try_again(browser_writer, session_uuid4)
-        await browser_writer.drain()
-        browser_writer.close()
-        await browser_writer.wait_closed()
+        try_again(client_writer, session_uuid4)
+        await client_writer.drain()
+        client_writer.close()
+        await client_writer.wait_closed()
         return
 
     # At this point we can be sure that the UUID-Cookie is truly in UUID4 format.
-    docker_container = await get_or_create_container(session_uuid4)
+    docker_container = await get_or_create_docker_container(session_uuid4)
     if docker_container is None:
-        # Für diese UUID wird bereits ein Docker-Container erstellt. Der Browser soll es gleich nochmal versuchen
-        try_again(browser_writer)
-        await browser_writer.drain()
-        browser_writer.close()
-        await browser_writer.wait_closed()
+        # For this UUID a Docker-Container is already being created. Tell the client to try again soon.
+        try_again(client_writer)
+        await client_writer.drain()
+        client_writer.close()
+        await client_writer.wait_closed()
         return
 
-    # Docker-Container Zustand aktualisieren und den vom Kernel zugewiesenen Port abrufen
+    # Docker-Container Zustand aktualisieren und den Port abrufen
     await asyncio.to_thread(docker_container.reload)
     port = docker_container.ports['1880/tcp'][0]['HostPort']  # e.g. ports = {'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32778'}, {'HostIp': '::', 'HostPort': '32778'}]}
 
     # TCP-Verbindung zum Docker-Container aufbauen und HTTP-Request des Browsers weiterleiten
     docker_reader, docker_writer = await asyncio.open_connection('localhost', port)
-    docker_writer.write(browser_http_header + browser_http_body)
+    docker_writer.write(client_http_header + client_http_body)
     await docker_writer.drain()
 
-    # HTTP-Response des Docker-Containers lesen. Hier kann festgestellt werden ob der Docker-Container schon bereit ist
+    # HTTP-Response des Docker-Containers lesen. Wenn es fehlschlägt, dann ist der Docker-Container noch nicht bereit.
     try:
-        docker_http_headers, docker_http_body = await read_http_header_and_body(docker_reader)
+        docker_http_header, docker_http_body = await read_http_header_and_body(docker_reader)
     except ConnectionResetError, IncompleteReadError:
-        logger.debug("Docker-Container ist noch nicht bereit. Der Browser wird benachrichtigt es nochmal zu versuchen")
-        try_again(browser_writer)
-        await browser_writer.drain()
-        browser_writer.close()
-        await browser_writer.wait_closed()
+        logger.debug("The Docker-Container is not ready yet. Tell the Client to try again.")
+        try_again(client_writer)
+        await client_writer.drain()
+        client_writer.close()
+        await client_writer.wait_closed()
         return
-    logger.debug(f"HTTP-Response: {docker_http_headers}")
+    logger.debug(f"HTTP-Response: {docker_http_header}")
     logger.debug(f"HTTP-Response: {docker_http_body}")
 
     # HTTP-Response des Docker-Containers an den Browser weiterleiten
-    browser_writer.write(docker_http_headers + docker_http_body)
-    await browser_writer.drain()
-
-    # For Debugging purposes
-    sessions[session_uuid4].client_addr = browser_writer.get_extra_info('peername')
-    sessions[session_uuid4].docker_addr = docker_writer.get_extra_info('peername')
+    client_writer.write(docker_http_header + docker_http_body)
+    await client_writer.drain()
 
     # Actual message forwarding. I placed the function here because aesthetically it suits here better than outside
     async def forward_message(reader, writer):
         while True:
-            message = await reader.read(4096)                # 4 KiB ist willkürlich gewählt
+            message = await reader.read(4096)                # 4 KiB (angelehnt an Pages) ist hier willkürlich gewählt
             logger.debug(f"Forward message: {message}")
             if not message:
                 break                                        # An *empty* message means disconnect
@@ -217,8 +215,8 @@ async def reverseproxy_handler(browser_reader, browser_writer):
         await writer.wait_closed()
 
     await asyncio.gather(
-        forward_message(browser_reader, docker_writer),
-        forward_message(docker_reader, browser_writer)
+        forward_message(client_reader, docker_writer),
+        forward_message(docker_reader, client_writer)
     )
 
 async def webui_handler(reader, writer):
@@ -251,4 +249,4 @@ if __name__ == '__main__':
         format="%(asctime)s.%(msecs)03d %(levelname)-7s %(name)-12s %(message)s",
         datefmt="%H:%M:%S"
     )
-    asyncio.run(main(), debug=True)
+    asyncio.run(main(), debug=None)
