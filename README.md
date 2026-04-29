@@ -16,7 +16,7 @@ Video description:
 - Thus, both the Client 1 and Container 1 are talking with each other through the Reverseproxy.
 - Let's assume a second Client (labeled Client 2) connects to the Reverseproxy while Client 1 is also still connected.
 - The Reverseproxy spawns a second Docker-Container (labeled Container 2) for Client 2.
-- Now, Client 2 and Container 2 speak with each other through the Reverseproxy and Client 1 and Container 1 speak with each other through the Reverseproxy.
+- Now, Client 2 and Container 2 speak with each other and Client 1 and Container 1 speak with each other through the Reverseproxy.
 - If one of the Clients disconnects, the Reverseproxy also deletes the Container associated with that Client (e.g. Client 1 disconnects, then the Reverseproxy deletes Container 1)
 
 # How to install?
