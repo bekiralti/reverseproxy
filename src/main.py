@@ -1,6 +1,7 @@
 # Standard Libraries (ja, man kann auch stattdessen einfach aiohttp verwenden ...)
 import asyncio, logging, os, re, signal, shutil, sys, time, uuid
 from asyncio import StreamReader, Task
+from asyncio.exceptions import IncompleteReadError
 from dataclasses import dataclass
 from typing import cast, Literal
 
@@ -36,10 +37,6 @@ def shutdown_gracefully(signum, frame):
 async def poll_sessions():
     while True:
         for uuid4, session in list(sessions.items()):
-            # It is possible, that someone with a UUID4 connects and not reconnects, thus only creating the container task but not actually awaiting it
-            if asyncio.isfuture(session.docker_container):
-                sessions[uuid4].docker_container = await session.docker_container
-                continue
             elapsed_time = time.time() - session.last_seen
             if elapsed_time > 60:
                 await asyncio.to_thread(session.docker_container.stop)    # IO-Bound
@@ -188,7 +185,7 @@ async def reverseproxy_handler(browser_reader, browser_writer):
     # HTTP-Response des Docker-Containers lesen. Hier kann festgestellt werden ob der Docker-Container schon bereit ist
     try:
         docker_http_headers, docker_http_body = await read_http_header_and_body(docker_reader)
-    except asyncio.exceptions.IncompleteReadError:
+    except ConnectionResetError, IncompleteReadError:
         logger.debug("Docker-Container ist noch nicht bereit. Der Browser wird benachrichtigt es nochmal zu versuchen")
         try_again(browser_writer)
         await browser_writer.drain()
