@@ -80,7 +80,7 @@ python ./src/main.py
 > [!NOTE]
 > Since Node-RED can *speak* Websocket out-of-the-box it is easier to immediately see and test the effects.
 
-Out-of-the-box this program simply starts a Node-RED Docker Container for each connecting Client.
+This reverseproxy simply starts a Node-RED Docker Container for each connecting Client.
 If the Node-RED Docker Image does not exist yet on your machine, 
 then it will be automatically downloaded by the `docker run` command.
 
