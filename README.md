@@ -120,4 +120,4 @@ To simulate a second Client you can open your browser in incognito and type in t
 # How this Reverseproxy was built?
 
 If you are interested on the thought processes, reasoning and learning that went into this project,
-then feel free to read through ./docs/implementation_journal.md.
+then feel free to read through [./docs/implementation_journal.md](./docs/implementation_journal.md).
