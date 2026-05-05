@@ -21,7 +21,10 @@ Video description:
 
 # How to install?
 
-**TODO**
+## Requirements
+
+- `python`
+- `docker`
 
 ## What further programs are needed?
 
