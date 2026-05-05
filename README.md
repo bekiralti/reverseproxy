@@ -19,7 +19,7 @@ Video description:
 - Now, Client 2 and Container 2 speak with each other and Client 1 and Container 1 speak with each other through the Reverseproxy.
 - If one of the Clients disconnects, the Reverseproxy also deletes the Container associated with that Client (e.g. Client 1 disconnects, then the Reverseproxy deletes Container 1)
 
-# How to install?
+# How to install and run?
 
 > [!TIP]
 > As of now, I'm mainly using Arch Linux. Thus, adjust the steps in this guide to your OS if necessary.
