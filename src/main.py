@@ -35,16 +35,19 @@ def shutdown_gracefully(signum, frame):
 
 async def poll_sessions():
     while True:
+        logger.info('Checking for expired sessions')
         for uuid4, session in list(sessions.items()):
             elapsed_time = time.time() - session.last_seen
+            logger.info(f"Elapsed Time: {elapsed_time} seconds, Session: {session}")
 
             # A *too tight* window leads to the deletion of the container before it can be even used
             if elapsed_time > 60:
-                shutil.rmtree(session.path)                               # TODO: Make this asyncio
+                logger.info(f"The Session is expired and will be deleted now")
+                await asyncio.to_thread(shutil.rmtree, session.path, ignore_errors=False, onerror=None)
                 await asyncio.to_thread(session.docker_container.stop)    # IO-Bound
                 await asyncio.to_thread(session.docker_container.remove)  # IO-Bound
                 del sessions[uuid4]
-        await asyncio.sleep(60)  # Polling every 1 minute (60 seconds). Node-RED heartbeat happens every ~15 seconds
+        await asyncio.sleep(60)  # Polling every 60 seconds. Node-RED heartbeat happens about every 15 seconds.
 
 def try_again(writer, uuid4=None):
     if uuid4:
@@ -62,7 +65,7 @@ def try_again(writer, uuid4=None):
             "\r\n").encode()
         )
 
-# Type annotation to calm down PyCharm
+# Type annotation to calm down the type checker
 async def get_or_create_docker_container(uuid4: str) -> Container | None:
     """Checks if a Docker-Container exists in the global `sessions` dictionary for the given `uuid4`.
 
@@ -70,12 +73,9 @@ async def get_or_create_docker_container(uuid4: str) -> Container | None:
 
     Returns None if the Docker-Container is being created.
     You have to *retry* with the same `uuid4` to get the created Docker-Container.
-
-    TODO: A malicious client can spam randomly generated UUID4 cookies and thus create multiple Docker-Containers.
-          One solution is to remember the IP address and limit the amount of Docker-Containers this IP address can spawn.
-          E.g. 1 Docker-Container every 60 seconds. Other solutions are also possible.
     """
 
+    # Eventually also rate-limit by IP, because a malicious client can send multiple requests with different UUID4s to create multiple unused Docker-Containers.
     if uuid4 in sessions:
         session = sessions[uuid4]
     else:
@@ -84,11 +84,11 @@ async def get_or_create_docker_container(uuid4: str) -> Container | None:
 
         # Each Browser has to get its own data folder, otherwise they will conflict each other!
         path = Path(__file__).parent.parent / 'data' / uuid4
-        path.mkdir()  # TODO: Make this also async, becaus it is IO-bound
+        await asyncio.to_thread(path.mkdir)
         docker_container = await asyncio.to_thread(
             docker_client.containers.run,
             'nodered/node-red',
-            detach=cast(Literal[True], True),                # -d, `cast(Literal[True], True)` instead of simply `True` just to calm down PyCharm
+            detach=cast(Literal[True], True),                # -d, `cast(Literal[True], True)` instead of simply `True` to calm down the type checker
             ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
             volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
         )
@@ -114,21 +114,19 @@ def parse_uuid4(text):
 
     return uuid4.group(1).decode() if uuid4 else None
 
-# Initially added these type-hints to calm down PyCharm. Meanwhile, code changed. Not sure if they are still necessary.
+# Type annotations to calm down the type checker
 async def read_http_header_and_body(reader: StreamReader) -> tuple[bytes, bytes]:
     """Returns a tuple: `(http_header, http_body)`.
 
     Returns `(http_header, b'')` if no `Content-Length` is specified.
 
-    Returns the tuple `(b'', b'')` if no message is received after `timeout` seconds.
-
-    TODO: Eventually tighten the timeout value. Maybe 1 seconds instead of 10 seconds?
+    Returns the tuple `(b'', b'')` if no message is received after 10 seconds.
     """
 
     # Timeout for when someone connects and doesn't send an *HTTP-Request* or just blocks the line
-    http_header = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 10)
+    http_header = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 10)  # Change timeout value if necessary
 
-    # TODO: Other options such as Chunked exist too beside Content-Length. One option amongst many: use aiohttp?
+    # Besides Content-Length there is also Chunked, which is not being handled here.
     content_length = re.search(
         rb"Content-Length: (\d+)",
         http_header,
