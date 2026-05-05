@@ -75,13 +75,44 @@ Then run this program:
 python ./src/main.py
 ```
 
+## Basic usage
+
+Out-of-the-box this program simply starts a Node-RED Docker Container for each connecting Client.
+If the Node-RED Docker Image does not exist yet on your machine, 
+then it will be automatically downloaded by the `docker run` command.
+
+However, instead of Node-RED you can use any other Docker Image of your choice. 
+You just have to change the Image Name in this part of the code
+
+```python
+docker_container = await asyncio.to_thread(
+    docker_client.containers.run,
+    'nodered/node-red',
+    detach=cast(Literal[True], True),
+    ports={'1880/tcp': 0},
+    volumes={path: {'bind': '/data', 'mode': 'rw'}}
+)
+```
+
+to the Docker Image you want to use
+
+```python
+docker_container = await asyncio.to_thread(
+    docker_client.containers.run,
+    'my-docker-image',
+    detach=cast(Literal[True], True),
+    ports={'1880/tcp': 0},
+    volumes={path: {'bind': '/data', 'mode': 'rw'}}
+)
+```
+
 ## Basic testing
 
 **Requirements**:
 - A browser of your choice (e.g. `firefox`).
 
-To simulate a Client open your browser and type in the URL: `localhost:3000`. 
-To simulate a second Client you can open your browser in incognito and type in the URL: `localhost:3000`.
+To simulate a Client open your browser and type in the URL: `localhost:1071`. 
+To simulate a second Client you can open your browser in incognito and type in the URL: `localhost:1071`.
 
 ## What further programs are needed?
 
