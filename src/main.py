@@ -1,8 +1,9 @@
 # Standard Libraries
-import asyncio, logging, os, re, signal, shutil, sys, time, uuid
+import asyncio, logging, re, signal, shutil, sys, time, uuid
 from asyncio import StreamReader
 from asyncio.exceptions import IncompleteReadError
 from dataclasses import dataclass
+from pathlib import Path
 from typing import cast, Literal
 
 # 3rd Party Libraries
@@ -18,7 +19,7 @@ sessions = {}  # Look-up-table
 @dataclass(slots=True)
 class Session:
     docker_container: Container
-    path: str
+    path: Path
     last_seen: float
 
 def shutdown_gracefully(signum, frame):
@@ -26,10 +27,9 @@ def shutdown_gracefully(signum, frame):
     logger.info("Reverse-proxy shuts down")
     for uuid4, session in sessions.items():
         logger.info(f"Stop and remove Docker-Container {session.docker_container} and delete its associated data at path: {session.path}")
-        if session.docker_container:
-            session.docker_container.stop()
-            session.docker_container.remove()
         shutil.rmtree(session.path)
+        session.docker_container.stop()
+        session.docker_container.remove()
     logger.info("Thank you and see you soon! :)")
     sys.exit(0)
 
@@ -40,9 +40,9 @@ async def poll_sessions():
 
             # A *too tight* window leads to the deletion of the container before it can be even used
             if elapsed_time > 60:
+                shutil.rmtree(session.path)                               # TODO: Make this asyncio
                 await asyncio.to_thread(session.docker_container.stop)    # IO-Bound
                 await asyncio.to_thread(session.docker_container.remove)  # IO-Bound
-                shutil.rmtree(session.path)                               # TODO: Make this asyncio
                 del sessions[uuid4]
         await asyncio.sleep(60)  # Polling every 1 minute (60 seconds). Node-RED heartbeat happens every ~15 seconds
 
@@ -83,8 +83,8 @@ async def get_or_create_docker_container(uuid4: str) -> Container | None:
         sessions[uuid4] = None  # Now, `uuid4 in sessions` evaluates to `True`
 
         # Each Browser has to get its own data folder, otherwise they will conflict each other!
-        path = os.path.abspath(f"../data/{uuid4}")
-        os.makedirs(path)  # TODO: Make this also async, becaus it is IO-bound
+        path = Path(__file__).parent.parent / 'data' / uuid4
+        path.mkdir()  # TODO: Make this also async, becaus it is IO-bound
         docker_container = await asyncio.to_thread(
             docker_client.containers.run,
             'my-villas-image',
