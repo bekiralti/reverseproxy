@@ -224,7 +224,7 @@ async def reverseproxy_handler(client_reader, client_writer):
 # TODO: Use port 443 for HTTPS instead of a *random* one like 3000. HTTPS needs TLS and whatnot.
 async def main():
     signal.signal(signal.SIGINT, shutdown_gracefully)
-    reverseproxy = await asyncio.start_server(reverseproxy_handler, '0.0.0.0', 3000)
+    reverseproxy = await asyncio.start_server(reverseproxy_handler, '0.0.0.0', 1071)
     async with reverseproxy:
         await asyncio.gather(reverseproxy.serve_forever(), poll_sessions())
 
