@@ -7,8 +7,8 @@ https://github.com/user-attachments/assets/8e0c54d3-5700-47f5-aca5-c39d097d5054
 
 Video description:
 - Assume a Client (labeled Client 1) connects to the Reverseproxy via a Browser (e.g. Firefox).
-> [!TIP]
-> If you type in a URL in your Browser and hit Enter, your Browser automatically sends a so called HTTP-Request to that URL.
+> [!NOTE]
+> If you type a URL in your Browser and hit Enter, your Browser automatically sends a so called HTTP-Request to that URL.
 - The Reverseproxy starts a Docker-Container (labeled Container 1).
 - The Reverseproxy forwards the HTTP-Request from Client 1 to Container 1.
 - Container 1 sends its Response (so called HTTP-Response) to the Reverseproxy.
