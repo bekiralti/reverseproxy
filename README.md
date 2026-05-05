@@ -30,7 +30,11 @@ First of all the **Requirements**:
 - `docker`.
 
 > [!IMPORTANT]
-> Make sure the docker deamon is running, e.g.: `sudo systemctl enable docker`
+> Make sure the docker daemon is running, e.g.: `sudo systemctl enable docker --now`.
+
+> [!IMPORTANT]
+> Add docker to your user group, to execute docker commands without sudo, e.g.: `sudo useradd -aG docker $USER`.
+> Reboot your machine or relogin to make this change effective.
 
 Second of all, you will need to download this repository. One way is to type in your terminal the following command:
 
