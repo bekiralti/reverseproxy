@@ -25,7 +25,7 @@ Video description:
 > As of now, I'm mainly using Arch Linux. Thus, adjust the steps in this guide to your OS if necessary.
 
 First of all the **Requirements**:
-- a terminal of your choice (e.g. `kitty`).
+- a terminal of your choice (e.g. `kitty`),
 - `python`.
 
 Second of all, you will need to download this repository. One way is to type in your terminal the following command:
