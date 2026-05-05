@@ -21,10 +21,59 @@ Video description:
 
 # How to install?
 
-## Requirements
+> [!IMPORTANT]
+> As of now, I'm mainly using Arch Linux. Thus, adjust the steps in this guide to your OS if necessary.
 
-- `python`
-- `docker`
+First of all the **Requirements**:
+- a terminal of your choice (e.g. `kitty`).
+- `python`.
+
+Second of all, you will need to download this repository. One way is to type in your terminal the following command:
+
+```shell
+git clone https://github.com/bekiralti/reverseproxy.git
+```
+
+Then change into the directory:
+
+```shell
+cd reverseproxy
+```
+
+Then create for Python a virtual environment (so that the additionally installed packages do not mess up your main Python installation):
+
+```shell
+python -m venv .venv
+```
+
+> [!NOTE]
+> The `.venv` is the directory name, you can choose whatever name you want.
+
+Then *activate* the venv:
+
+```shell
+source .venv/bin/activate
+```
+
+Then install this program:
+
+```shell
+pip install .
+```
+
+Then run this program:
+
+```shell
+python ./src/main.py
+```
+
+## Basic testing
+
+**Requirements**:
+- A browser of your choice (e.g. `firefox`).
+
+To simulate a Client open your browser and type in the URL: `localhost:3000`. 
+To simulate a second Client you can open your browser in incognito and type in the URL: `localhost:3000`.
 
 ## What further programs are needed?
 
