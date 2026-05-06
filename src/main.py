@@ -1,17 +1,23 @@
 # Standard Libraries
-import asyncio, logging, re, signal, shutil, sys, time, uuid
+import asyncio, json, logging, re, signal, shutil, sys, time, uuid
 from asyncio import StreamReader
 from asyncio.exceptions import IncompleteReadError
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast, Literal
 
-# 3rd Party Libraries
+# 3rd Party Libraries (eventually also rewrite the HTTP parsing logic with aiohttp)
 import docker
 from docker.models.containers import Container
 
+# Local Libraries
+import webui
+
 # Global variables
 docker_client = docker.from_env()
+counter = 0    # Used to mask the actual UUID4 (for the WebUI, I didn't want to expose IP-Addresses or the UUID4s)
+free_ids = deque()
 logger = logging.getLogger(__name__)
 sessions = {}  # Look-up-table
 
@@ -21,11 +27,23 @@ class Session:
     docker_container: Container
     path: Path
     last_seen: float
+    id: int
+
+def new_id() -> int:
+    global counter
+
+    if free_ids:
+        new_id = free_ids.popleft()
+    else:
+        counter += 1
+        new_id = counter
+
+    return new_id
 
 def shutdown_gracefully(signum, frame):
     logger.info(f"Signal: {signum}, Frame: {frame}")
     logger.info("Reverse-proxy shuts down")
-    for uuid4, session in sessions.items():
+    for session in sessions.values():
         logger.info(f"Stop and remove Docker-Container {session.docker_container} and delete its associated data at path: {session.path}")
         shutil.rmtree(session.path)
         session.docker_container.stop()
@@ -38,7 +56,7 @@ async def poll_sessions():
         logger.info('Checking for expired sessions')
         for uuid4, session in list(sessions.items()):
             elapsed_time = time.time() - session.last_seen
-            logger.info(f"Elapsed Time: {elapsed_time} seconds, Session: {session}")
+            logger.info(f"Elapsed Time: {elapsed_time} seconds for {session}")
 
             # A *too tight* window leads to the deletion of the container before it can be even used
             if elapsed_time > 60:
@@ -46,23 +64,24 @@ async def poll_sessions():
                 await asyncio.to_thread(shutil.rmtree, session.path, ignore_errors=False, onerror=None)
                 await asyncio.to_thread(session.docker_container.stop)    # IO-Bound
                 await asyncio.to_thread(session.docker_container.remove)  # IO-Bound
+                free_ids.append(session.id)
                 del sessions[uuid4]
         await asyncio.sleep(60)  # Polling every 60 seconds. Node-RED heartbeat happens about every 15 seconds.
 
-def try_again(writer, uuid4=None):
+def try_again(uuid4=None):
+    """Returns an HTTP-Response template string with the `Refresh` Header and sets Cookie with the given UUID4."""
     if uuid4:
-        writer.write((
+        return (
             "HTTP/1.1 200 OK\r\n"
             f"Set-Cookie: uuid4={uuid4}\r\n"
             "Refresh: 5\r\n"
-            "\r\n").encode()
+            "\r\n"
         )
     else:
-        # UUID is None
-        writer.write((
+        return (
             "HTTP/1.1 200 OK\r\n"
             "Refresh: 5\r\n"
-            "\r\n").encode()
+            "\r\n"
         )
 
 # Type annotation to calm down the type checker
@@ -94,7 +113,7 @@ async def get_or_create_docker_container(uuid4: str) -> Container | None:
         )
 
         # Update the above Dummy with the actual Session object
-        sessions[uuid4] = Session(docker_container=docker_container, path=path, last_seen=time.time())
+        sessions[uuid4] = Session(docker_container=docker_container, path=path, last_seen=time.time(), id=new_id())
 
         return docker_container
 
@@ -126,7 +145,7 @@ async def read_http_header_and_body(reader: StreamReader) -> tuple[bytes, bytes]
     # Timeout for when someone connects and doesn't send an *HTTP-Request* or just blocks the line
     http_header = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 10)  # Change timeout value if necessary
 
-    # Besides Content-Length there is also Chunked, which is not being handled here.
+    # As of now, only Content-Length is supported. Might have to add Chunked support as well later on.
     content_length = re.search(
         rb"Content-Length: (\d+)",
         http_header,
@@ -139,7 +158,7 @@ async def read_http_header_and_body(reader: StreamReader) -> tuple[bytes, bytes]
     return http_header, http_body
 
 async def reverseproxy_handler(client_reader, client_writer):
-    # Immediately try to read the HTTP-Request and UUID-Cookie
+    # Upon a successful connection immediately try to read the HTTP-Request
     try:
         client_http_header, client_http_body = await read_http_header_and_body(client_reader)
     except IncompleteReadError:
@@ -152,14 +171,45 @@ async def reverseproxy_handler(client_reader, client_writer):
         client_writer.close()
         await client_writer.wait_closed()
         return
-    logger.info(f"HTTP-Request: {client_http_header}")
-    logger.info(f"HTTP-Request: {client_http_body}")
+    logger.info(f"HTTP-Request-Header: {client_http_header}")
+    logger.info(f"HTTP-Request-Body: {client_http_body}")
+
+    # This function is basically the branching point between the WebUI (SSE) or the Docker-Container
+    if client_http_header.startswith(b'GET /events'):
+        client_writer.write((
+            b'HTTP/1.1 200 OK\r\n'
+            b'Content-Type: text/event-stream\r\n'
+            b'\r\n'
+        ))
+        while True:
+            data = [{f"connection_id": session.id} for session in sessions.values()]
+            data = f"data: {json.dumps(data)}\n\n"
+            client_writer.write(data.encode())
+
+            # Diese Exceptions treten i.d.R. auf, wenn die Verbindung unterbrochen wurde (Bsp.: Client hat Tab geschlossen)
+            try:
+                await client_writer.drain()
+            except ConnectionResetError:
+                logger.info("Client disconnected from the WebUI")
+                client_writer.close()
+                # An dieser Stelle ist der Socket sowieso tot, await client_writer.wait_closed() wirft BrokenPipeError
+                # Fehlermeldung aus "/usr/lib/python3.14/asyncio/selector_events.py" ist hier nicht zu vermeiden
+                return
+            await asyncio.sleep(1)
+    elif webui_response := await webui.handle_request(client_http_header):
+        client_writer.write(webui_response)
+        await client_writer.drain()
+        client_writer.close()
+        await client_writer.wait_closed()
+        return
+
+    # At this point we know the Client wants a Docker-Container. Continue by reading its UUID4-Cookie.
     session_uuid4 = parse_uuid4(client_http_header)
 
     # Prevent multiple docker-container creations by someone who for example simply spams: curl my-proxy.net
     if session_uuid4 is None:
         session_uuid4 = uuid.uuid4()  # Assumption: UUID4 is unique enough that collisions won't happen
-        try_again(client_writer, session_uuid4)
+        client_writer.write(try_again(session_uuid4).encode())
         await client_writer.drain()
         client_writer.close()
         await client_writer.wait_closed()
@@ -169,7 +219,7 @@ async def reverseproxy_handler(client_reader, client_writer):
     docker_container = await get_or_create_docker_container(session_uuid4)
     if docker_container is None:
         # For this UUID a Docker-Container is already being created. Tell the client to try again soon.
-        try_again(client_writer)
+        client_writer.write(try_again().encode())
         await client_writer.drain()
         client_writer.close()
         await client_writer.wait_closed()
@@ -189,13 +239,13 @@ async def reverseproxy_handler(client_reader, client_writer):
         docker_http_header, docker_http_body = await read_http_header_and_body(docker_reader)
     except ConnectionResetError, IncompleteReadError:
         logger.info("The Docker-Container is not ready yet. Telling the Client to try again.")
-        try_again(client_writer)
+        client_writer.write(try_again().encode())
         await client_writer.drain()
         client_writer.close()
         await client_writer.wait_closed()
         return
-    logger.info(f"HTTP-Response: {docker_http_header}")
-    logger.debug(f"HTTP-Response: {docker_http_body}")
+    logger.info(f"HTTP-Response-Header: {docker_http_header}")
+    logger.debug(f"HTTP-Response-Body: {docker_http_body}")
 
     # HTTP-Response des Docker-Containers an den Browser weiterleiten
     client_writer.write(docker_http_header + docker_http_body)
@@ -228,7 +278,7 @@ async def main():
 
 if __name__ == '__main__':
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s.%(msecs)03d %(levelname)-7s %(name)-12s %(message)s",
         datefmt="%H:%M:%S"
     )
