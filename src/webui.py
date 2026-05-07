@@ -5,7 +5,7 @@ from pathlib import Path
 import aiofiles
 
 async def handle_request(http_header):
-    if http_header.startswith(b'GET /webui HTTP/1.1'):
+    if http_header.startswith(b'GET /webui'):
         async with aiofiles.open(Path(__file__).parent / 'webui.html', 'rb') as fh:
             html = await fh.read()
             header = (
@@ -16,7 +16,7 @@ async def handle_request(http_header):
             )
         return header.encode() + html
 
-    if http_header.startswith(b'GET /webui.js HTTP/1.1'):
+    if http_header.startswith(b'GET /webui.js'):
         async with aiofiles.open(Path(__file__).parent / 'webui.js', 'rb') as fh:
             js = await fh.read()
             header = (
@@ -27,7 +27,7 @@ async def handle_request(http_header):
             )
         return header.encode() + js
 
-    if http_header.startswith(b'GET /favicon.ico HTTP/1.1'):
+    if http_header.startswith(b'GET /favicon.ico'):
         async with aiofiles.open(Path(__file__).parent / 'favicon.webp', 'rb') as fh:
             ico = await fh.read()
             header = (
