@@ -13,9 +13,9 @@ reasoning and learning that went into this project.
 
 First of all, what do I want to accomplish?
 
-![Clienet<->Rp<->Container](./pics/client-rp-container.png)
+![2 Clients <-> Reverseproxy <-> 2 Containers](./pics/2clients-rp-2containers.png)
 
-
+Basically, a Client that connects to my Reverseproxy
 
 At the end of the day, the Client is supposed to communicate with our process (`reverseproxy`) through the internet (i.e. by calling its URL in a Browser such as Firefox).
 The method that immediately comes to mind might be: *Sockets*.
