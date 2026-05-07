@@ -13,7 +13,7 @@ reasoning and learning that went into this project.
 
 First of all, what do I want to accomplish?
 
-<!-- Grafik -->
+![Clienet<->Rp<->Container](./pics/client-rp-container.png)
 
 
 
