@@ -174,7 +174,7 @@ async def reverseproxy_handler(client_reader, client_writer):
     logger.info(f"HTTP-Request-Header: {client_http_header}")
     logger.info(f"HTTP-Request-Body: {client_http_body}")
 
-    # This function is basically the branching point between the WebUI (SSE) or the Docker-Container
+    # This is basically the branching point: WebUI (SSE) or Docker-Container
     if client_http_header.startswith(b'GET /events'):
         client_writer.write((
             b'HTTP/1.1 200 OK\r\n'
