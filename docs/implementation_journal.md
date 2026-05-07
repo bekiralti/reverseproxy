@@ -1,17 +1,28 @@
 # What is this file about?
 
-In this file, we will go step-by-step through the thought processes, reasoning and learning that went into this project.
+In this file, I will try to go step-by-step through the thought processes, 
+reasoning and learning that went into this project.
 
 > [!NOTE]
 > Always be aware: Other, maybe even better solutions exist!
 
-> [!IMPORTANT]
+> [!NOTE]
 > For these examples, we will stick to Node-RED Docker-Containers.
 
 # Step 1: IPC (Inter-Process-Communication)
 
+First of all, what do I want to accomplish?
+
+<!-- Grafik -->
+
+
+
 At the end of the day, the Client is supposed to communicate with our process (`reverseproxy`) through the internet (i.e. by calling its URL in a Browser such as Firefox).
-The method that immediately comes to my mind is: *Sockets*.
+The method that immediately comes to mind might be: *Sockets*.
+
+At least in Linux and usually other popular Operating Systems you can easily define a socket. 
+While defining a socket you usually have to decide on what type of socket you have to use. 
+E.g. for Network Communication can tell our socket to speak TCP (or UDP or other protocols).
 
 Operating systems usually provide parameters that give network capabilities to your newly created socket, 
 such as `AF_INET` for IPv4 and `SOCK_STREAM` for TCP, thus effectively having a socket that can understand TCP/IP.
