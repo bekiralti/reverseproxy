@@ -11,7 +11,7 @@ with socket.socket(AF_INET, SOCK_STREAM) as s:
         with conn:
             print(f"Connected by {addr}")
             while True:
-                message = conn.recv(512)
+                message = conn.recv(1024)
                 print(message)
                 if not message:
                     break
