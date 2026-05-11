@@ -121,23 +121,49 @@ If you go on and research you will figure out that each HTTP-Request (and HTTP-R
 ```
 
 The HTTP-Header (which we see in the above output) is separated from the HTTP-Body by an empty newline, 
-thus the double `\r\n\r\n` at the end of the HTTP-Header. On the very first HTTP-Request there is no HTTP-Body.
+thus the double `\r\n\r\n` at the end of the HTTP-Header.
 
 As you saw in the above output the `HTTP-Header` can consist of multiple headers such as `Host:`, `User-Agent:`, `Accept:` etc.
 There is also the infamous `Cookies:` header (not shown in the above output). 
-We will get to this soon however the Cookies are set by the website you are visiting. 
+Cookies are set by the website you are visiting. 
 Upon receiving your HTTP-Request some websites send a header field such as `Set-Cookie: name=value\r\n` in their HTTP-Response.
-Upon receiving this, your Browser automatically saves this Cookie and sends it whenever you call the same website.
+Upon receiving this HTTP-Response, 
+your Browser automatically saves this Cookie and sends it whenever you call the same website.
 
 # Step 2: Handling more than one Client at the same time
 
-As of now, the above Code can only handle exactly one Client. 
-We could simply wrap `s.accept()` inside a `ẁhile True:` loop to handle more than one Clients however we will only be able to handle each Client sequentially.
-If two or more Clients connect at the same time they will have to wait on each other to get an HTTP-Response from the server.
+As of now, the above Code can only handle exactly one Client and that only once.
+We could simply wrap `s.accept()` inside a `ẁhile True:` loop to handle more than one Client however we will only be able to handle each Client sequentially.
+The second Client will have to wait until the first Client is done and closes the connection.
 
-We do want to handle each Client rather *simultaneously*. 
-There are multiple ways to accomplish this (e.g. `multithreading`, `multiprocessing` etc.). 
-We are going to use `asyncio` for this.
+```python
+import socket
+from socket import AF_INET, SOCK_STREAM
+
+with socket.socket(AF_INET, SOCK_STREAM) as s:
+    print("Binding socket")
+    s.bind(('0.0.0.0', 1453))
+    s.listen()
+    print("Waiting for a connection")
+    while True:
+        conn, addr = s.accept()
+        with conn:
+            print(f"Connected by {addr}")
+            while True:
+                message = conn.recv(512)
+                print(message)
+                if not message:
+                    break
+```
+
+There are multiple ways to handle more than one Client *at the same time*, e.g. `multithreading` or `multiprocessing`.
+However, I decided to go with `asyncio`. It is another form of concurrent programming besides multithreading.
+
+> [!NOTE]
+> Python's `multiprocessing` is basically `multithreading` by executing an entire Python Interpreter for each Thread.
+
+> [!NOTE]
+> I have linked a YouTube video at the end of this document for anyone who wants to develop a better understanding of Python's `asyncio`.
 
 <!--
 # Step 3: Spawning a Node-RED Docker-Container when one client connects
@@ -156,3 +182,7 @@ We are going to use `asyncio` for this.
 
 # Step 9: Accessories
 -->
+
+# Asyncio explained
+
+![AsyncIO Python](https://youtu.be/oAkLSJNr5zY?si=ES2S-NLZ0Um8hd7F)
