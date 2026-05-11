@@ -1,115 +1,145 @@
 # What is this file about?
 
 In this file, I will try to go step-by-step through the thought processes, 
-reasoning and learning that went into this project.
-
-> [!NOTE]
-> Always be aware: Other, maybe even better solutions exist!
-
-> [!NOTE]
-> For these examples, we will stick to Node-RED Docker-Containers.
+reasoning and learning that went into this project. I don't want to make this too detailed, 
+but I also don't want to make it too basic. It is going to be difficult to find a good balance, 
+but I hope you can bear with me or suggest improvements. Thank you, very much!
 
 # Step 1: IPC (Inter-Process-Communication)
 
-First of all, what do I want to accomplish?
+At the end of the day, 
 
 ![2 Clients <-> Reverseproxy <-> 2 Containers](./pics/2clients-rp-2containers.png)
 
-Basically, a Client that connects to my Reverseproxy
+I want that a person is able to connect to this Reverseproxy by typing in the URL and hitting Enter in his Browser.
+Since this Reverseproxy is nothing but a process and the Browser is nothing but a process the immediately answer that comes to my mind is: *Sockets*!
 
-At the end of the day, the Client is supposed to communicate with our process (`reverseproxy`) through the internet (i.e. by calling its URL in a Browser such as Firefox).
-The method that immediately comes to mind might be: *Sockets*.
+Sockets allow two processes to talk with each other. 
+In this case the benefit of Sockets is that they also support IPC over internet.
+Most of the time you just have to define the Socket-Type (e.g. `SOCK_STREAM` for TCP) and Adress-Family (e.g. `AF_INET` for IPv4).
 
-At least in Linux and usually other popular Operating Systems you can easily define a socket. 
-While defining a socket you usually have to decide on what type of socket you have to use. 
-E.g. for Network Communication can tell our socket to speak TCP (or UDP or other protocols).
+Let's write a simple socket.
 
-Operating systems usually provide parameters that give network capabilities to your newly created socket, 
-such as `AF_INET` for IPv4 and `SOCK_STREAM` for TCP, thus effectively having a socket that can understand TCP/IP.
+```python
+# ./examples/step1_1.py
+import socket
+from socket import AF_INET, SOCK_STREAM
+
+with socket.socket(AF_INET, SOCK_STREAM) as s:
+    print("Binding socket")
+    s.bind(('0.0.0.0', 1453))
+    s.listen()
+    print("Waiting for a connection")
+    conn, addr = s.accept()
+    with conn:
+        print(f"Connected by {addr}")
+```
+
+The above Code implements a socket that binds itself on all IPv4 addresses that are available to your device.
+One way to figure out which addresses are available you can open up a terminal and type in the command `ip addr`.
+Let's run the above Code and then type in a Browser the URL `localhost:1453`. The output will look something like this:
+
+```
+Binding socket
+Waiting for a connection
+Connected by ('127.0.0.1', 60934)
+
+Process finished with exit code 0
+```
+
+Let's try and see if the Browser sends any message upon connecting. 
+Since there doesn't seem to be any function like `read_entire_message()`, 
+we will have to use the `recv()` function and constantly read a specific amount of bytes.
+
+```python
+# ./examples/step1_2.py
+import socket
+from socket import AF_INET, SOCK_STREAM
+
+with socket.socket(AF_INET, SOCK_STREAM) as s:
+    print("Binding socket")
+    s.bind(('0.0.0.0', 1453))
+    s.listen()
+    print("Waiting for a connection")
+    conn, addr = s.accept()
+    with conn:
+        print(f"Connected by {addr}")
+        while True:
+            message = conn.recv(512)
+            print(message)
+```
+
+The output will look something like this:
+
+```
+Binding socket
+Waiting for a connection
+Connected by ('127.0.0.1', 46232)
+b'GET / HTTP/1.1\r\nHost: localhost:1453\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: de,en-US;q=0.9,en;q=0.8\r\nAccept-Encoding: gzip, deflate, br, zstd\r\nSec-GPC: 1\r\nConnection: keep-alive\r\nUpgrade-Insecure-Requests: 1\r\nSec-Fetch-Dest: document\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-Site: none\r\nSec-Fetch-User: ?1\r\nPriority: u=0, i\r\n\r\n'
+```
+
+Before we proceed, let's realize what we are seeing here. Whenever you call a website in your Browser, 
+your Browser automatically sends a so called HTTP-Request (just like in the above output) to that website.
+Each website is programmed in such a way that it can understand the above HTTP-Request and reply accordingly.
+The reply is called HTTP-Response.
 
 > [!NOTE]
-> We are creating a TCP/IP socket, 
-> because we are assuming that browsers are usually programmed in such a way that they will try to establish communication via a TCP/IP socket.
+> A website is basically a program (written in whatever programming language) that listens on a socket, 
+> processes the incoming HTTP-Requests and replies.
 
-We will be using Python, because the abstractions are nice to have and will come handy soon enough. 
-Also, socket programming in [Python maps directly to the system calls from C](https://realpython.com/python-sockets/#python-socket-api-overview).
+Once you click on `Stop loading Page` inside your Browser you will get a bunch of `b''` in your output. 
+This `b''` signals the end of connection.
 
-<!--
-TODO: Very simple synchronous server socket.
-TODO: Very simple synchronous client socket.
-TODO: Show in the Terminal that the socket communication works.
-TODO: Show in the Browser that the Communication works.
--->
+```python
+# ./examples/step1_3.py
+import socket
+from socket import AF_INET, SOCK_STREAM
 
-> [!IMPORTANT]
-> Two sockets (e.g. Browser and Reverseproxy) need to be defined on the same parameters (e.g. `AF_INET` and `SOCK_STREAM`) to communicate with each other.
+with socket.socket(AF_INET, SOCK_STREAM) as s:
+    print("Binding socket")
+    s.bind(('0.0.0.0', 1453))
+    s.listen()
+    print("Waiting for a connection")
+    conn, addr = s.accept()
+    with conn:
+        print(f"Connected by {addr}")
+        while True:
+            message = conn.recv(512)
+            print(message)
+            if not message:
+                break
+```
 
-<!--
-TODO: Redefine the Client socket to AF_INET and SOCK_DGRAM.
-TODO: Show that both sockets need to have the same parameters in order to successfully communicate with each other.
--->
+As you might have noticed, each line in the HTTP-Request ist terminated by `\r\n`. 
+This behavior is exactly defined in the RFC documents.
+If you go on and research you will figure out that each HTTP-Request (and HTTP-Response) have the very same structure.
 
-# Step 2: Can we handle more than one client at the same time?
+```
+<HTTP-Header>
+\r\n
+<HTTP-Body>
+```
 
-Let's see what happens if two clients connect *simultaneously*.
+The HTTP-Header (which we see in the above output) is separated from the HTTP-Body by an empty newline, 
+thus the double `\r\n\r\n` at the end of the HTTP-Header. On the very first HTTP-Request there is no HTTP-Body.
 
-<!--
-TODO: Example code for two clients.
-TODO: Show that the above server cannot handle two or more clients at the same time.
--->
+As you saw in the above output the `HTTP-Header` can consist of multiple headers such as `Host:`, `User-Agent:`, `Accept:` etc.
+There is also the infamous `Cookies:` header (not shown in the above output). 
+We will get to this soon however the Cookies are set by the website you are visiting. 
+Upon receiving your HTTP-Request some websites send a header field such as `Set-Cookie: name=value\r\n` in their HTTP-Response.
+Upon receiving this, your Browser automatically saves this Cookie and sends it whenever you call the same website.
 
-> [!IMPORTANT]
-> The above server example cannot handle two or more clients *at the same time*!
+# Step 2: Handling more than one Client at the same time
 
-## Step 2.1: Parallel programming and concurrency
+As of now, the above Code can only handle exactly one Client. 
+We could simply wrap `s.accept()` inside a `ẁhile True:` loop to handle more than one Clients however we will only be able to handle each Client sequentially.
+If two or more Clients connect at the same time they will have to wait on each other to get an HTTP-Response from the server.
 
-We can handle more than one client *simultanesouly* if we make use of parallel programming or concurrency.
-
-First, let's take a closer look at parallel programming. 
-If you are familiar with C you will know that you can call functions calls from different physical threads (keyword: `pthread`) thus parallelizing your program.
-A similar sounding library also exists in Python, which is called `multithreading`.
-
-<!--
-TODO: Server Example with multithreading
-TODO: Show that 2 clients can be handled simultanesouly
--->
-
-> [!WARNING]
-> Despite the multithreading library spawning multiple threads, they unfortunately cannot execute the code in parallel.
-> That's because of the Python's so-called GIL (Global-Interpreter-Lock). There are ways to disable the GIL though.
-
-<!--
-TODO: Reformatting
-TODO: Proof
--->
-
-> [!NOTE]
-> To truly run Python code in parallel you can use the multiprocessing library. 
-> However, in order to achieve true parallelism the multiprocessing library simply spawns entire new Python interpreters, 
-> This unfortunately creates massive overhead.
+We do want to handle each Client rather *simultaneously*. 
+There are multiple ways to accomplish this (e.g. `multithreading`, `multiprocessing` etc.). 
+We are going to use `asyncio` for this.
 
 <!--
-TODO: Reformatting
-TODO: Proof
--->
-
-Python provides us with a *third* option (actually second, since both `multithreading` and `multiprocessing` spawn new threads).
-The *third* option is called `asyncio`. However, it literally runs on exactly one single thread.
-Yes, the downside is that we now have even *less* parallelism than before, 
-however the upside is that it has less overhead than creating entire new threads.
-
-You can imagine `asyncio` like your operating system running the scheduler on exactly one single thread.
-As of now, I don't see myself capable enough to provide a concise explanation.
-Thankfully there is a YouTube video which helped me immensely in understanding Python's async programming.
-
-Another upside of Python's `asyncio` module is that it provides us with simpler helpful abstractions for socket programming.
-
-<!--
-TODO: Rewrite server in asyncio.
-TODO: Rewrite client in asyncio.
-TODO: Show.
--->
-
 # Step 3: Spawning a Node-RED Docker-Container when one client connects
 
 # Step 4: Reverseproxy (for only one client)
@@ -125,3 +155,4 @@ TODO: Show.
 # Step 8: Reverseproxy (we finally did it!)
 
 # Step 9: Accessories
+-->
