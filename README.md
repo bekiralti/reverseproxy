@@ -1,4 +1,4 @@
-# What is this Reverseproxy about?
+# What is this about?
 
 This Reverseproxy spawns for any connecting client its own Docker-Container. 
 The following video is supposed to show the basic way this Reverseproxy works.
@@ -6,18 +6,18 @@ The following video is supposed to show the basic way this Reverseproxy works.
 https://github.com/user-attachments/assets/8e0c54d3-5700-47f5-aca5-c39d097d5054
 
 Video description:
-- Assume a Client (labeled Client 1) connects to the Reverseproxy via a Browser (e.g. Firefox).
-> [!NOTE]
-> If you type a URL in your Browser and hit Enter, your Browser automatically sends a so called HTTP-Request to that URL.
-- The Reverseproxy starts a Docker-Container (labeled Container 1).
-- The Reverseproxy forwards the HTTP-Request from Client 1 to Container 1.
-- Container 1 sends its Response (so called HTTP-Response) to the Reverseproxy.
-- The Reverseproxy forwards the HTTP-Response from Container 1 to Client 1.
-- Thus, both the Client 1 and Container 1 are talking with each other through the Reverseproxy.
-- Let's assume a second Client (labeled Client 2) connects to the Reverseproxy while Client 1 is also still connected.
+- Assume a Client (labeled Client 1) connects to the Reverseproxy (via a Browser such as Firefox).
+- Upon calling a *website* the Browser automatically sends a so called HTTP-Request.
+- The Reverseproxy receives the HTTP-Request and starts a Docker-Container (labeled Container 1).
+- The Reverseproxy forwards the HTTP-Request to Container 1.
+- Container 1 receives the HTTP-Request and replies with a so called HTTP-Response.
+- The Reverseproxy receives the HTTP-Response.
+- The Reverseproxy forwards the HTTP-Response to Client 1.
+- Thus, the Reverseproxy has established a Connection between Client 1 and Container 1.
+- Let's assume a second Client (labeled Client 2) connects to the Reverseproxy while Client 1 is still connected as well.
 - The Reverseproxy spawns a second Docker-Container (labeled Container 2) for Client 2.
 - Now, Client 2 and Container 2 speak with each other and Client 1 and Container 1 speak with each other through the Reverseproxy.
-- If one of the Clients disconnects, the Reverseproxy also deletes the Container associated with that Client (e.g. Client 1 disconnects, then the Reverseproxy deletes Container 1)
+- If one of the Clients disconnects (e.g. Client 1), then the Reverseproxy also deletes the Container associated with that Client.
 
 # How to install and run?
 
@@ -36,7 +36,7 @@ First of all the **Requirements**:
 > Add docker to your user group in order to execute docker commands without sudo, e.g.: `sudo useradd -aG docker $USER`.
 > Reboot your machine or relogin to make this change effective.
 
-Second of all, you will need to download this repository. One way is to type in your terminal the following command:
+Second of all, download this repository. One way is to type in your terminal the following command:
 
 ```shell
 git clone https://github.com/bekiralti/reverseproxy.git
@@ -48,7 +48,7 @@ Then change into the directory:
 cd reverseproxy
 ```
 
-Then create for Python a virtual environment (so that the additionally installed packages do not mess up your main Python installation):
+Then create a Python virtual environment (so that the additionally installed packages required by this Reverseproxy do not mess up your system Python installation):
 
 ```shell
 python -m venv .venv
@@ -69,22 +69,30 @@ Then install this program:
 pip install .
 ```
 
+> [!NOTE]
+> You can use `pip install -e .` instead if you want to change things in the Code and see its effects immediately without having to reinstall.
+
 Then run this program:
 
 ```shell
 python ./src/main.py
 ```
 
-## Basic usage
+## Basic example
 
-> [!NOTE]
-> Since Node-RED can *speak* Websocket out-of-the-box it is easier to immediately see and test the effects.
+Once you run this program
 
-This reverseproxy simply starts a Node-RED Docker Container for each connecting Client.
-If the Node-RED Docker Image does not exist yet on your machine, 
-then it will be automatically downloaded by the `docker run` command.
+```shell
+python ./src/main.py
+```
 
-However, instead of Node-RED you can use any other Docker Image of your choice. 
+open up a Browser of your choice (e.g. Firefox) and type in `localhost:1071`. 
+After a short while you should see a Node-RED Docker-Container loading up. 
+To simulate a second Client you can open another Browser in incognito mode and type in `localhost:1071`.
+
+## Basic usage / customization
+
+Instead of the default Node-RED Docker-Container you can use any other Docker Image of your choice. 
 You just have to change the Image Name in this part of the code
 
 ```python
@@ -109,13 +117,8 @@ docker_container = await asyncio.to_thread(
 )
 ```
 
-## Basic testing
-
-**Requirements**:
-- A browser of your choice (e.g. `firefox`).
-
-To simulate a Client open your browser and type in the URL: `localhost:1071`. 
-To simulate a second Client you can open your browser in incognito and type in the URL: `localhost:1071`.
+> [!NOTE]
+> One of the reasons for Node-RED being the Default is that you can see the workings of the Reverseproxy immediately thanks to Node-RED's Websocket implementation.
 
 # How this Reverseproxy was built?
 
