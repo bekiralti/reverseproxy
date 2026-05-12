@@ -16,13 +16,9 @@ async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> Non
         ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
         volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
     )
-    while True:
-        await asyncio.to_thread(container.reload)
-        print(container.status)
-        print(container.ports)
-        port = container.ports['1880/tcp'][0]['HostPort']
-        print(port)
-        await asyncio.sleep(1)
+    print(container.ports)
+    port = container.ports['1880/tcp'][0]['HostPort']
+    print(port)
 
 async def main():
     s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)

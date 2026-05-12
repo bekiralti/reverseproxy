@@ -255,12 +255,13 @@ with the `StreamReader` object you can read whatever the Client sends on that co
 # Step 4: Spawning a Node-RED Docker-Container
 
 > [!TIP]
-> Make sure to have the `docker` module installed in Python virtual environment.
+> Make sure to have the `docker` module installed in your Python virtual environment.
+> Make sure that you also have docker installed in your OS with the configurations, which you can find in the main page.
 
 > [!NOTE]
-> The `àsyncio` module helps in IO-Bound operations. Thus, I will try to make every IO-Bound operation async.
+> The `àsyncio` module helps with IO-Bound operations. Thus, I will try to make every IO-Bound operation async.
 
-For the (Node-RED) Docker-Container we will need a data directory.
+Before starting the Node-RED Docker-Container we have to make sure that we create a data folder for it.
 
 ```python
 # ./examples/step4_1.py
@@ -284,8 +285,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Now, we will create the Docker-Container. 
-We will let the Kernel choose a free port on which we will speak to the Docker-Container.
+Now, we will create the Docker-Container. We will let the Kernel choose a free port for the Docker-Container.
 
 ```python
 # ./examples/step4_2.py
@@ -319,12 +319,6 @@ asyncio.run(main())
 Since we let the Kernel choose a free port, 
 we have to first get the port number in order to build a connection to that Docker-Container.
 
-Let's try to get the port number. 
-The `reload()` method is used to fetch the latest information of the container.
-
-> [!NOTE]
-> I will also add a `await asyncio.sleep(1)` to not unnecessarily let the CPU work in 100 %.
-
 ```python
 # ./examples/step4_3.py
 import asyncio
@@ -345,13 +339,9 @@ async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> Non
         ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
         volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
     )
-    while True:
-        await asyncio.to_thread(container.reload)
-        print(container.status)
-        print(container.ports)
-        port = container.ports['1880/tcp'][0]['HostPort']
-        print(port)
-        await asyncio.sleep(1)
+    print(container.ports)
+    port = container.ports['1880/tcp'][0]['HostPort']
+    print(port)
 
 async def main():
     s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
@@ -361,15 +351,13 @@ async def main():
 asyncio.run(main())
 ```
 
-If it works, you should see something like:
+> [!NOTE]
+> The `ports` attribute returns something like `{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32778'}, {'HostIp': '::', 'HostPort': '32778'}]}`.
 
-```
-running
-{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32798'}, {'HostIp': '::', 'HostPort': '32798'}]}
-32798
-```
+The above Code will most likely give a `KeyError: '1880/tcp`, 
+that happens because we need to refresh the container values.
 
-If it doesn't work, then make sure to give the Docker-Container more time to start, e.g.:
+Let's try again. This time by calling the `reload()` method.
 
 ```python
 # ./examples/step4_4.py
@@ -391,14 +379,10 @@ async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> Non
         ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
         volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
     )
-    while True:
-        await asyncio.sleep(30)
-        await asyncio.to_thread(container.reload)
-        print(container.status)
-        print(container.ports)
-        port = container.ports['1880/tcp'][0]['HostPort']
-        print(port)
-        await asyncio.sleep(1)
+    await asyncio.to_thread(container.reload)
+    print(container.ports)
+    port = container.ports['1880/tcp'][0]['HostPort']
+    print(port)
 
 async def main():
     s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
@@ -407,6 +391,36 @@ async def main():
 
 asyncio.run(main())
 ```
+
+This time I get the following output:
+
+```
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32779'}, {'HostIp': '::', 'HostPort': '32779'}]}
+32779
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32780'}, {'HostIp': '::', 'HostPort': '32780'}]}
+32780
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32781'}, {'HostIp': '::', 'HostPort': '32781'}]}
+32781
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32782'}, {'HostIp': '::', 'HostPort': '32782'}]}
+32782
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32783'}, {'HostIp': '::', 'HostPort': '32783'}]}
+32783
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32784'}, {'HostIp': '::', 'HostPort': '32784'}]}
+32784
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32785'}, {'HostIp': '::', 'HostPort': '32785'}]}
+32785
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32786'}, {'HostIp': '::', 'HostPort': '32786'}]}
+32786
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32787'}, {'HostIp': '::', 'HostPort': '32787'}]}
+32787
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32788'}, {'HostIp': '::', 'HostPort': '32788'}]}
+32788
+```
+
+As you can guess, 10 Node-RED Docker-Containers were created. 
+This happens because the Browser receives an EOF before receiving a proper HTTP-Response.
+Thus, the Browser fires up to 9 more connections in the hopes to reach the socket and receive a proper HTTP-Response.
+It is just the way, at least the Firefox Browser, has been programmed.
 
 > [!NOTE]
 > You can stop and remove all the Docker-Containers by typing `docker stop $(docker ps -qa)` and `docker rm $(docker ps -qa)` in your terminal.
