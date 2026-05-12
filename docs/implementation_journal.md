@@ -1,29 +1,34 @@
 # What is this file about?
 
-In this file, I will try to go step-by-step through the thought processes, 
-reasoning and learning that went into this project. I will try to not get lost in details, 
-but I also will try to not make it too basic. It is going to be difficult to find a good balance, 
-but I hope you can bear with me or suggest improvements. Thank you, very much!
+In this file, I will try to go step-by-step through my thought processes and reasoning.
 
-# Step 1: IPC (Inter-Process-Communication)
+# Step 1: Plan
+
+Let's take a look again at the diagram from the video on the main page.
 
 ![2 Clients <-> Reverseproxy <-> 2 Containers](./pics/2clients-rp-2containers.png)
 
-In order to accomplish what is depicted in the above image, we, first of all, 
-need to figure out a way for a Client to communicate with our Reverseproxy program. 
-The Client is supposed to connect to this Reverseproxy by opening up his favorite Browser (e.g. Firefox), 
-typing in the URL and hitting Enter.
+Client 1 and Client 2 are supposed to connect to the Reverseproxy via typing in its URL in a Browser such as Firefox.
+As soon as Client 1 connects the Reverseproxy starts a Node-RED Docker-Container for Client 1.
+As soon as Client 2 connects the Reverseproxy starts a Node-RED Docker-Container for Client 2.
+The Reverseproxy connects Client 1 with Container 1 and Client 2 with Container 2.
+Both connections are basically isolated from each other by the Reverseproxy.
+When a Client disconnects its Container also gets deleted.
 
-At the end of the day, this Reverseproxy is nothing but a process and the Browser is nothing but a process. 
-Both processes are supposed to communicate with each other through the internet. 
-The immediate method to accomplish this seems to be by using *Sockets*. 
-Our Reverseproxy will listen on a socket and each Client (Browser process) can connect to that socket.
+# Step 2: IPC (Inter-Process-Communication)
 
-To accomplish this, we will define the socket with the Socket-Type `SOCK_STREAM` (basically TCP) and the Address-Family `AF_INET` (basically IPv4).
-Let's write it:
+First of all, I had to figure out how Client 1 can connect to the Reverseproxy. 
+Since the Browser is a process and my Reverseproxy is a process the immediate and only answer that came to my mind was **Sockets**.
+
+We can easily define a TCP (`SOCK_STREAM`) socket and bind it to an IPv4 adress (`AF_INET`) that is available to our device.
+
+> [!NOTE]
+> You can check which IP addresses are available to your device by typing in the command `ìp addr` in your terminal.
+
+Let's take a look at an example code:
 
 ```python
-# ./examples/step1_1.py
+# ./examples/step2_1.py
 import socket
 from socket import AF_INET, SOCK_STREAM
 
@@ -37,18 +42,12 @@ with socket.socket(AF_INET, SOCK_STREAM) as s:
         print(f"Connected by {addr}")
 ```
 
-The above Code implements a socket that binds itself on all IPv4 addresses that are available to your device (`0.0.0.0`).
+The above Code implements a TCP socket that binds on all IPv4 addresses that are available to your device (`0.0.0.0`).
 
 > [!NOTE]
-> You can see the IPv4 addresses that are available to your device by opening up a terminal and typing in the command `ip addr`.
+> This means, you can reach communicate through this socket by typing in any of the IPv4 addresses you see in the `ìp addr` output.
 
-> [!NOTE]
-> The address `127.0.0.1` or `localhost` is the loopback address. 
-> Besides that address, if you are connected to a WLAN, you might also see an address like `192.168.170.23`.
-> Everyone in the same WLAN can basically address your device with that IP.
-
-Now, let's run the above Code and then type in a Browser the URL `localhost:1453`. 
-The output will look something like this.
+If I run the above Code and type in my Browser `localhost:1453`, then the above Code gives me the following output:
 
 ```
 Binding socket
@@ -58,11 +57,10 @@ Connected by ('127.0.0.1', 60934)
 Process finished with exit code 0
 ```
 
-Let's try and see if the Browser sends any message upon connecting. 
-
+Now, let's read if and what kind of message we receive when the Browser connects to our socket.
 
 ```python
-# ./examples/step1_2.py
+# ./examples/step2_2.py
 import socket
 from socket import AF_INET, SOCK_STREAM
 
@@ -79,7 +77,10 @@ with socket.socket(AF_INET, SOCK_STREAM) as s:
             print(message)
 ```
 
-The output will look something like this:
+We read the incoming message in a loop. 
+In each iteration we try to read `1024` Bytes (you can for example experiment with this number) from the *network buffer*.
+
+If I run the above Code and type in the URL `localhost:1453` in my Browser I get the following output:
 
 ```
 Binding socket
@@ -89,23 +90,68 @@ b'GET / HTTP/1.1\r\nHost: localhost:1453\r\nUser-Agent: Mozilla/5.0 (X11; Linux 
 ```
 
 > [!NOTE]
-> As far as I am aware, there doesn't seem to be any function like `read_entire_message()`.
-> That's why we have to use the `recv()` function. We loop over it and read an arbritrary amount of bytes.
+> I desperately tried to find a function such as `read_entire_message()`, 
+> but it looks like in network programming we don't have such luxurious functions. 
+> For me, this was a key point in which I realized why protocols even exist in the first place.
 
-Before we proceed, **let's realize what we are seeing here**. Whenever you call a website in your Browser, 
-your Browser automatically sends a so called HTTP-Request (just like in the above output) to that *website*.
-Each *website* is programmed in such a way that it can understand the above HTTP-Request and reply accordingly.
-The reply is called HTTP-Response. As of now, our Reverseproxy doesn't send any reply back.
+## Step 2.1: Analyzing the Browser's first message
+
+Let's take a look at the output starting with `GET / HTTP/1.1\r\n...`. 
+If you check out [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html) you will realize that the Browser's first message is a so called HTTP-Request.
+The schema is always the same:
+
+```
+<HTTP-Header>
+\r\n
+<HTTP-Body>
+```
+
+Realizing this demystified websites for me. 
+A *website* is nothing but a process (written in whatever programming language) that listens on a socket,
+processes the incoming HTTP-Requests and replies accordingly. 
+The website needs to reply in such a way that the Browser can understand it. 
+
+The reply is structurally very similar to the HTTP-Request. The major differences are the header fields.
+Other than that each header field ends with `\r\n` and the Body and Header are separated by a blank line `\r\n\r\n`.
+
+```
+<HTTP-Header>
+\r\n
+<HTTP-Body>
+```
+
+Therefore, the reply is simply called HTTP-Response.
+
+The Browser always sends this or a similar message upon connecting to a website.
 
 > [!NOTE]
-> A *website* is basically a program (written in whatever programming language) that listens on a socket, 
-> processes the incoming HTTP-Requests and replies accordingly.
+> You can check this out for yourself by opening up *networktools* and connecting to any website.
 
-Once we click on `Stop loading Page` (in the Browser) we will get a bunch of `b''` in our output. 
-This `b''` signals the end of connection. We can make use of it in our Code.
+## Step 2.2: Realizing why today's Browsers are such massive pieces of software
+
+If you looked a bit into programming a website you will know the three fundamental file types: HTML, CSS and JS.
+The HTTP-Body in the HTTP-Response can be written in HTML, CSS or JS. 
+We can expect that a (major) Browser such as Firefox will be able to interpret the HTTP-Body correctly.
+
+This realization on the other hand, made me aware that I can simply write my own Browser. 
+Here is a little sketch for it:
+
+- Upon typing in the URL the Browser has to automatically send a proper HTTP-Request.
+- The Browser has to parse and correctly interpret the HTTP-Response.
+
+Sounds simple, but I will also have to write the logic that interprets and displays all the HTML, CSS and JS code, 
+which I imagine is exhausting. I now understand why Browser are such massive pieces of software. Impressive.
+
+## Step 2.3: End of connection
+
+If the above Code is still running you will notice that the page is still *loading* in your Browser. 
+Once you click on `Stop loading Page` you will get a bunch of `b''` in our Code output. 
+The `b''` signals the end of connection. 
+
+Let's make use of it in our Code:
 
 ```python
-# ./examples/step1_3.py
+# ./examples/step2_3.py
 import socket
 from socket import AF_INET, SOCK_STREAM
 
@@ -124,33 +170,13 @@ with socket.socket(AF_INET, SOCK_STREAM) as s:
                 break
 ```
 
-As you might have noticed, each line in the HTTP-Request is terminated by `\r\n`. 
-This behavior is exactly defined in the RFC documents.
-If you go on and research you will figure out that each HTTP-Request (and HTTP-Response) have the very same structure.
-
-```
-<HTTP-Header>
-\r\n
-<HTTP-Body>
-```
-
-The HTTP-Header (which we see in the above output) is separated from the HTTP-Body by an empty newline, 
-thus the `\r\n\r\n` at the end of the HTTP-Header in the output above.
-
-The `HTTP-Header` can consist of multiple headers such as `Host:`, `User-Agent:`, `Accept:` etc.
-There is also the infamous `Cookie:` header (not shown in the above output). 
-Cookies are set by the website you are visiting. 
-Upon receiving your HTTP-Request some websites send a header field such as `Set-Cookie: name=value\r\n` in their HTTP-Response.
-Upon receiving this HTTP-Response, 
-your Browser automatically saves this Cookie and sends it whenever you call the same website.
-
-# Step 2: Handling more than one Client at the same time
+# Step 3: Handling more than one Client at the same time
 
 As of now, the above Code can only handle exactly one Connection.
 We could simply wrap `s.accept()` inside a `ẁhile True:` loop to handle more than one Connection (simply speaking each Connection could be a Client). 
 
 ```python
-# ./examples/step2_1.py
+# ./examples/step3_1.py
 import socket
 from socket import AF_INET, SOCK_STREAM
 
@@ -172,23 +198,25 @@ with socket.socket(AF_INET, SOCK_STREAM) as s:
 
 However, we will only be able to handle only one Connection at a time. 
 In other words, we can only process each Client sequentially. 
-As one Client is being processed all the other Clients will have to wait.
+As one Client is being processed all the other Clients will have to wait on that one Client.
 
-We don't want Clients to have to wait on other Clients. Each Client should be processed *in parallel*.
-Thankfully, in Python, there are multiple ways to handle more than one Client *at the same time*, 
-e.g. `multithreading` or `multiprocessing`. However, I decided to go with `asyncio`. 
+I don't want Clients to have to wait on other Clients. Each Client should be processed *in parallel* aka *concurrently*.
+There are multiple ways to accomplish this. One way is through `multithreading` or `multiprocessing`. 
 
 > [!NOTE]
 > Python's `multiprocessing` is basically `multithreading` except each Thread gets its own entire Python Interpreter,
 > thus creating way more overhead.
 
+Another way is by using Python's `asyncio` standard library.
+
 > [!NOTE]
 > I have linked a YouTube video at the end of this document for anyone who wants to develop a better understanding of Python's `asyncio` module.
+> That video helped me a lot, I watched it halfway through.
 
 Let's rewrite the above example with the `asyncio` module.
 
 ```python
-# ./examples/step2_2.py
+# ./examples/step3_2.py
 import asyncio
 from asyncio import StreamReader, StreamWriter
 
@@ -227,9 +255,241 @@ With the `StreamWriter` object you can reply to the Client.
 
 # Step 3: Spawning a Node-RED Docker-Container when a Client connects
 
-<!--
-# Step 4: Reverseproxy (for only one client)
+> [!NOTE]
+> If you haven't already installed this Reverseproxy module and are in the venv, 
+> then make sure that you at least have the `docker` Python module installed for the next steps.
 
+> [!NOTE]
+> We will try to execute any IO-Bound operation in async mode.
+
+For the (Node-RED) Docker-Container we will need a data directory.
+
+```python
+# ./examples/step4_1.py
+import asyncio
+import docker
+import uuid
+from asyncio import StreamReader, StreamWriter
+from pathlib import Path
+
+d = docker.from_env()
+
+async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> None:
+    path = Path(__file__).parent.parent / 'data' / uuid.uuid4().hex
+    await asyncio.to_thread(path.mkdir)
+
+async def main():
+    s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
+    async with s:
+        await s.serve_forever()
+
+asyncio.run(main())
+```
+
+Now, we will create the Docker-Container. 
+We will let the Kernel choose a free port on which we will speak to the Docker-Container.
+
+```python
+# ./examples/step4_2.py
+import asyncio
+import docker
+import uuid
+from asyncio import StreamReader, StreamWriter
+from pathlib import Path
+
+d = docker.from_env()
+
+async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> None:
+    path = Path(__file__).parent.parent / 'data' / uuid.uuid4().hex
+    await asyncio.to_thread(path.mkdir)
+    container = await asyncio.to_thread(
+        d.containers.run,
+        'nodered/node-red',
+        detach=True,                                     # -d
+        ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
+        volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
+    )
+
+async def main():
+    s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
+    async with s:
+        await s.serve_forever()
+
+asyncio.run(main())
+```
+
+Since we let the Kernel choose a free port, 
+we have to first get the port number in order to build a connection to that Docker-Container.
+
+Let's try to get the port number. 
+The `reload()` method is used to fetch the latest information of the container.
+
+> [!NOTE]
+> I will also add a `await asyncio.sleep(1)` to not unnecessarily let the CPU work in 100 %.
+
+```python
+# ./examples/step4_3.py
+import asyncio
+import docker
+import uuid
+from asyncio import StreamReader, StreamWriter
+from pathlib import Path
+
+d = docker.from_env()
+
+async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> None:
+    path = Path(__file__).parent.parent / 'data' / uuid.uuid4().hex
+    await asyncio.to_thread(path.mkdir)
+    container = await asyncio.to_thread(
+        d.containers.run,
+        'nodered/node-red',
+        detach=True,                                     # -d
+        ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
+        volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
+    )
+    while True:
+        await asyncio.to_thread(container.reload)
+        print(container.status)
+        print(container.ports)
+        port = container.ports['1880/tcp'][0]['HostPort']
+        print(port)
+        await asyncio.sleep(1)
+
+async def main():
+    s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
+    async with s:
+        await s.serve_forever()
+
+asyncio.run(main())
+```
+
+If it works, you should see something like:
+
+```
+running
+{'1880/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '32798'}, {'HostIp': '::', 'HostPort': '32798'}]}
+32798
+```
+
+If it doesn't work, then make sure to give the Docker-Container more time to start, e.g.:
+
+```python
+# ./examples/step4_4.py
+import asyncio
+import docker
+import uuid
+from asyncio import StreamReader, StreamWriter
+from pathlib import Path
+
+d = docker.from_env()
+
+async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> None:
+    path = Path(__file__).parent.parent.parent / 'data' / uuid.uuid4().hex
+    await asyncio.to_thread(path.mkdir)
+    container = await asyncio.to_thread(
+        d.containers.run,
+        'nodered/node-red',
+        detach=True,                                     # -d
+        ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
+        volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
+    )
+    while True:
+        await asyncio.sleep(30)
+        await asyncio.to_thread(container.reload)
+        print(container.status)
+        print(container.ports)
+        port = container.ports['1880/tcp'][0]['HostPort']
+        print(port)
+        await asyncio.sleep(1)
+
+async def main():
+    s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
+    async with s:
+        await s.serve_forever()
+
+asyncio.run(main())
+```
+
+> [!NOTE]
+> You can stop and remove all the Docker-Containers by typing `docker stop $(docker ps -qa)` and `docker rm $(docker ps -qa)` in your terminal.
+
+> [!NOTE]
+> After you are done with your experiments, 
+> make sure to delete all the directories that have been created in `reverseproxy/data/`.
+
+# Step 4: Forwarding
+
+We are almost there to have finally created the Reverseproxy. We just need to forward the messages from:
+
+- Client to Container,
+- Container to Client.
+
+For that, 
+we can define a function `forward(reader, writer)` and call it once with the Client-Reader and Container-Writer and once with the Container-Reader and Client-Writer objects.
+First, we need to get the Container-Writer and Container-Reader objects by simply connecting to the Container.
+
+Let's try it all in one go.
+
+> ![NOTE]
+> Before we run the next program, let's clean up the directories in the `reverseproxy/data` path and the Docker-Containers (`docker stop $(docker ps -qa) && docker rm $(docker ps -qa)`).
+
+```python
+# ./examples/step5_1.py
+import asyncio
+import docker
+import uuid
+from asyncio import StreamReader, StreamWriter
+from pathlib import Path
+
+d = docker.from_env()
+
+async def forward(reader, writer):
+    while True:
+        message = await reader.read(4096)
+        print(message)
+        if not message:
+            break
+        writer.write(message)
+        await writer.drain()
+    writer.close()
+    await writer.wait_closed()
+
+async def client_connected_cb(client_reader: StreamReader, client_writer: StreamWriter) -> None:
+    path = Path(__file__).parent.parent.parent / 'data' / uuid.uuid4().hex
+    print(path)
+    await asyncio.to_thread(path.mkdir)
+    container = await asyncio.to_thread(
+        d.containers.run,
+        'nodered/node-red',
+        detach=True,                                     # -d
+        ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
+        volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
+    )
+    await asyncio.to_thread(container.reload)
+    port = container.ports['1880/tcp'][0]['HostPort']
+    print(port)
+    container_reader, container_writer = await asyncio.open_connection('localhost', port)
+    await asyncio.gather(
+        forward(client_reader, container_writer),
+        forward(container_reader, client_writer)
+    )
+
+async def main():
+    s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
+    async with s:
+        await s.serve_forever()
+
+asyncio.run(main())
+```
+
+> [!NOTE]
+> In case the Docker-Container needs time to properly start-up add something like `await asyncio.sleep(10)` before you call the `reload()` method on the Container.
+
+I do get a `ConnectionResetError`. Let's see if it works when I wait a little bit for the Docker-Container.
+
+# Step 5: Parsing the HTTP-Request and identifying the Browser
+
+<!--
 # Step 5: Making sure that one client doesn't spawn *infinite* Docker-Containers
 
 # Step 5.1: A rather exotic issue: Malicious client
