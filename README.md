@@ -1,6 +1,7 @@
 # What is this about?
 
-This Reverseproxy spawns for any connecting client its own Docker-Container. 
+This Reverseproxy spawns for any connecting client its own Node-RED Docker-Container. 
+
 The following video is supposed to show the basic way this Reverseproxy works.
 
 https://github.com/user-attachments/assets/8e0c54d3-5700-47f5-aca5-c39d097d5054
@@ -92,8 +93,8 @@ To simulate a second Client you can open another Browser in incognito mode and t
 
 ## Basic usage / customization
 
-Instead of the default Node-RED Docker-Container you can use any other Docker Image of your choice. 
-You just have to change the Image Name in this part of the code
+Instead of the default Node-RED Docker-Container you can try to use any other Docker Image of your choice. 
+You just have to change the Image name in the following part of the code:
 
 ```python
 docker_container = await asyncio.to_thread(
@@ -105,7 +106,7 @@ docker_container = await asyncio.to_thread(
 )
 ```
 
-to the Docker Image you want to use
+Change `ǹodered/node-red` to any Docker-Image you would like to try out, e.g. `my-docker-image`.
 
 ```python
 docker_container = await asyncio.to_thread(
@@ -116,9 +117,6 @@ docker_container = await asyncio.to_thread(
     volumes={path: {'bind': '/data', 'mode': 'rw'}}
 )
 ```
-
-> [!NOTE]
-> One of the reasons for Node-RED being the Default is that you can see the workings of the Reverseproxy immediately thanks to Node-RED's Websocket implementation.
 
 # How this Reverseproxy was built?
 
