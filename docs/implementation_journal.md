@@ -45,7 +45,7 @@ with socket.socket(AF_INET, SOCK_STREAM) as s:
 The above Code implements a TCP socket that binds on all IPv4 addresses that are available to your device (`0.0.0.0`).
 
 > [!NOTE]
-> This means, you can reach communicate through this socket by typing in any of the IPv4 addresses you see in the `ìp addr` output.
+> This means, you can communicate with this socket by typing in any of the IPv4 addresses you see in the `ìp addr` output.
 
 If I run the above Code and type in my Browser `localhost:1453`, then the above Code gives me the following output:
 
