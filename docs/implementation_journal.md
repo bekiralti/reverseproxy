@@ -246,21 +246,19 @@ b''
 
 Quick recap on what is happening in the Code. For each connection the `client_connected_cb` function is called.
 Each connection gets its own `StreamReader` and `StreamWriter` object. Basically speaking, 
-with the `StreamReader` object you can read whatever the Client sends on that connection.
-With the `StreamWriter` object you can reply to the Client.
+with the `StreamReader` object you can read whatever the Client sends on that connection and with the `StreamWriter` object you can reply to that Client.
 
 > [!NOTE]
 > The `StreamReader` object provides us with more comfortable high-level functions such as `readuntil()` or `readexactly()`, 
-> which we will make use of.
+> which we can and will make use of thanks to the way HTTP is defined.
 
-# Step 3: Spawning a Node-RED Docker-Container when a Client connects
+# Step 4: Spawning a Node-RED Docker-Container
+
+> [!TIP]
+> Make sure to have the `docker` module installed in Python virtual environment.
 
 > [!NOTE]
-> If you haven't already installed this Reverseproxy module and are in the venv, 
-> then make sure that you at least have the `docker` Python module installed for the next steps.
-
-> [!NOTE]
-> We will try to execute any IO-Bound operation in async mode.
+> The `àsyncio` module helps in IO-Bound operations. Thus, I will try to make every IO-Bound operation async.
 
 For the (Node-RED) Docker-Container we will need a data directory.
 
