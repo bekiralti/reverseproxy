@@ -6,18 +6,12 @@ from pathlib import Path
 
 d = docker.from_env()
 
-async def forward(reader, writer):
-    while True:
-        message = await reader.read(4096)
-        print(message)
-        if not message:
-            break
-        writer.write(message)
-        await writer.drain()
-    writer.close()
-    await writer.wait_closed()
-
 async def client_connected_cb(client_reader: StreamReader, client_writer: StreamWriter) -> None:
+    # HTTP-Request
+    http_header = await client_reader.readuntil(b'\r\n\r\n')
+    print(http_header)
+
+    # Docker-Container
     path = Path(__file__).parent.parent.parent / 'data' / uuid.uuid4().hex
     print(path)
     await asyncio.to_thread(path.mkdir)
@@ -31,11 +25,16 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     await asyncio.to_thread(container.reload)
     port = container.ports['1880/tcp'][0]['HostPort']
     print(port)
+
+    # Forward
     container_reader, container_writer = await asyncio.open_connection('localhost', port)
-    await asyncio.gather(
-        forward(client_reader, container_writer),
-        forward(container_reader, client_writer)
-    )
+    container_writer.write(http_header)
+    await container_writer.drain()
+
+    http_header = await container_reader.readuntil(b'\r\n\r\n')
+    print(http_header)
+    client_writer.write(http_header)
+    await client_writer.drain()
 
 async def main():
     s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)

@@ -1,6 +1,7 @@
 import asyncio
 import docker
 import uuid
+import re
 from asyncio import StreamReader, StreamWriter, IncompleteReadError
 from pathlib import Path
 
@@ -43,7 +44,12 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
             continue
         break
     print(http_header)
-    client_writer.write(http_header)
+
+    content_length = re.search(rb'Content-Length:\s*(\d+)', http_header, re.IGNORECASE)
+    content_length = int(content_length.group(1)) if content_length else 0
+    http_body = await container_reader.readexactly(content_length)
+    print(http_body)
+    client_writer.write(http_header + http_body)
     await client_writer.drain()
 
 async def main():
