@@ -424,12 +424,9 @@ It is just the way, at least the Firefox Browser, has been programmed.
 
 > [!NOTE]
 > You can stop and remove all the Docker-Containers by typing `docker stop $(docker ps -qa)` and `docker rm $(docker ps -qa)` in your terminal.
+> Also make sure to delete all the directories inside `reverseproxy/data/`.
 
-> [!NOTE]
-> After you are done with your experiments, 
-> make sure to delete all the directories that have been created in `reverseproxy/data/`.
-
-# Step 4: Forwarding
+# Step 5: Forwarding
 
 We are almost there to have finally created the Reverseproxy. We just need to forward the messages from:
 
