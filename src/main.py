@@ -87,7 +87,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
             data = f"data: {json.dumps(data)}\n\n"
             client_writer.write(data.encode())
 
-            # Diese Exceptions treten i.d.R. auf, wenn die Verbindung unterbrochen wurde (Bsp.: Client hat Tab geschlossen)
+            # Diese Exception tritt i.d.R. auf, wenn die Verbindung unterbrochen wurde bspw. Client hat Tab geschlossen.
             try:
                 await client_writer.drain()
             except ConnectionResetError:
