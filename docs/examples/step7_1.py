@@ -19,7 +19,7 @@ formatter = logging.Formatter(
     datefmt="%H:%M:%S"
 )
 
-file_handler = logging.FileHandler("step6_3.log")
+file_handler = logging.FileHandler("step7_1.log")
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(formatter)
 
