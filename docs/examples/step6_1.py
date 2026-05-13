@@ -12,6 +12,8 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     http_header = await client_reader.readuntil(b'\r\n\r\n')
     print(http_header)
 
+    # Try reading the UUID4 Cookie
+
     # Docker-Container
     path = Path(__file__).parent.parent.parent / 'data' / str(uuid.uuid4())
     await asyncio.to_thread(path.mkdir)

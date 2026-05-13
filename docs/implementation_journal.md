@@ -648,8 +648,17 @@ This brings us to the next step.
 
 # Step 6: Identifying the Session
 
-There are multiple ways to identify the session. I will simply use the UUID4, 
-which I already use to create the data directory and set it as a Cookie for the Browser.
+There are multiple ways to identify the session. I will simply reuse the UUID4, 
+which I already create to make the data directory. 
+
+Here is the plan:
+- Check the HTTP-Request for the UUID4 Cookie.
+- Check if a Container is running for this UUID4 Cookie, because it could be an *expired* Cookie.
+- If a Container is running then simply connect to that and forward the HTTP-Request.
+- If no Container is running then simply create one and forward the HTTP-Request.
+- If no Container is running then inject the UUID4 Cookie `Set-Cookie: uuid4=<uuid4>` into Node-RED's HTTP-Response.
+
+Let's try and implement it:
 
 <!--
 # Step 7: Saving server disk space
