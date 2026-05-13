@@ -3,10 +3,14 @@ import docker
 import logging
 import uuid
 import re
+import shutil
+import signal
+import sys
 from asyncio import StreamReader, StreamWriter, IncompleteReadError
 from dataclasses import dataclass
 from docker.models.containers import Container
 from pathlib import Path
+from signal import SIGINT
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -15,7 +19,7 @@ formatter = logging.Formatter(
     datefmt="%H:%M:%S"
 )
 
-file_handler = logging.FileHandler("step6_2.log")
+file_handler = logging.FileHandler("step6_3.log")
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(formatter)
 
@@ -33,6 +37,15 @@ class Session:
 
 d = docker.from_env()
 sessions = {}
+
+def graceful_shutdown(signum, frame):
+    logger.debug(f"Signal: {signum}, Frame: {frame}")
+    for session in sessions.values():
+        logger.debug(f"Stop and Remove Docker-Container: {session.docker_container}")
+        session.docker_container.stop()
+        session.docker_container.remove()
+        shutil.rmtree(session.path)
+    sys.exit(0)
 
 async def forward(reader: StreamReader, writer: StreamWriter) -> None:
     while True:
@@ -129,6 +142,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
         await client_writer.drain()
 
 async def main():
+    signal.signal(SIGINT, graceful_shutdown)
     s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
     async with s:
         await s.serve_forever()
