@@ -5,6 +5,7 @@ description = "One Docker-Container for each connecting Browser"
 requires-python = ">=3.14.4"
 authors = [{ name = "Bekir Altindal", email = "bekir.altindal@rwth-aachen.de" }]
 dependencies = [
+    "aiofiles == 25.1.0",
     "docker == 7.1.0"
 ]
 
