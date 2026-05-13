@@ -39,9 +39,9 @@ d = docker.from_env()
 sessions = {}
 
 def graceful_shutdown(signum, frame):
-    logger.debug(f"Signal: {signum}, Frame: {frame}")
+    logger.info(f"Signal: {signum}, Frame: {frame}")
     for session in sessions.values():
-        logger.debug(f"Stop and Remove Docker-Container: {session.docker_container}")
+        logger.info(f"Stop and Remove Docker-Container: {session.docker_container}")
         session.docker_container.stop()
         session.docker_container.remove()
         shutil.rmtree(session.path)
@@ -50,6 +50,7 @@ def graceful_shutdown(signum, frame):
 async def forward(reader: StreamReader, writer: StreamWriter) -> None:
     while True:
         message = await reader.read(4096)
+        logger.debug(f"Forward: {message}")
         if not message:
             break
         writer.write(message)
@@ -60,11 +61,11 @@ async def forward(reader: StreamReader, writer: StreamWriter) -> None:
 async def client_connected_cb(client_reader: StreamReader, client_writer: StreamWriter) -> None:
     # Try reading the UUID4 Cookie from the HTTP-Request
     http_header = await client_reader.readuntil(b'\r\n\r\n')
-    logger.debug(f"HTTP-Request Header: {http_header}")
+    logger.info(f"HTTP-Request Header: {http_header}")
 
     uuid4 = re.search(rb'uuid4=([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})', http_header)
     uuid4 = uuid4.group(1).decode() if uuid4 else None
-    logger.debug(f"UUID4: {uuid4}")
+    logger.info(f"UUID4: {uuid4}")
 
     if uuid4 in sessions:
         port = sessions[uuid4].container.ports['1880/tcp'][0]['HostPort']
@@ -76,12 +77,12 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
 
         # Forward HTTP-Response: Container -> Client
         http_header = await container_reader.readuntil(b'\r\n\r\n')
-        logger.debug(f"HTTP-Response Header: {http_header}")
+        logger.info(f"HTTP-Response Header: {http_header}")
 
         content_length = re.search(rb'Content-Length:\s*(\d+)', http_header, re.IGNORECASE)
         content_length = int(content_length.group(1)) if content_length else 0
         http_body = await container_reader.readexactly(content_length)
-        logger.debug(f"HTTP-Response Body: {http_body}")
+        logger.info(f"HTTP-Response Body: {http_body}")
 
         client_writer.write(http_header + http_body)
         await client_writer.drain()
@@ -94,7 +95,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     else:
         # Docker-Container
         uuid4 = str(uuid.uuid4())
-        logger.debug(f"UUID4: {uuid4}")
+        logger.info(f"UUID4: {uuid4}")
         path = Path(__file__).parent.parent.parent / 'data' / uuid4
         await asyncio.to_thread(path.mkdir)
         container = await asyncio.to_thread(
@@ -107,7 +108,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
         sessions[uuid4] = Session(container, path)
         await asyncio.to_thread(container.reload)
         port = container.ports['1880/tcp'][0]['HostPort']
-        logger.debug(f"Port: {port}")
+        logger.info(f"Port: {port}")
 
         # Forward
         while True:
@@ -129,13 +130,13 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
 
         # Inject UUID4 Cookie inside Node-RED's HTTP-Response
         http_header = http_header.replace(b'\r\n\r\n', f"\r\nSet-Cookie: uuid4={uuid4}\r\n\r\n".encode(), 1)
-        logger.debug(f"HTTP-Response Header: {http_header}")
+        logger.info(f"HTTP-Response Header: {http_header}")
 
         # Read HTTP-Body
         content_length = re.search(rb'Content-Length:\s*(\d+)', http_header, re.IGNORECASE)
         content_length = int(content_length.group(1)) if content_length else 0
         http_body = await container_reader.readexactly(content_length)
-        logger.debug(f"HTTP-Response Body: {http_body}")
+        logger.info(f"HTTP-Response Body: {http_body}")
 
         # Forward HTTP-Response: Container -> Client
         client_writer.write(http_header + http_body)
