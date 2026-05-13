@@ -12,8 +12,7 @@ Video description:
 - The Reverseproxy receives the HTTP-Request and starts a Docker-Container (labeled Container 1).
 - The Reverseproxy forwards the HTTP-Request to Container 1.
 - Container 1 receives the HTTP-Request and replies with a so called HTTP-Response.
-- The Reverseproxy receives the HTTP-Response.
-- The Reverseproxy forwards the HTTP-Response to Client 1.
+- The Reverseproxy receives the HTTP-Response and forwards it to Client 1.
 - Thus, the Reverseproxy has established a Connection between Client 1 and Container 1.
 - Let's assume a second Client (labeled Client 2) connects to the Reverseproxy while Client 1 is still connected as well.
 - The Reverseproxy spawns a second Docker-Container (labeled Container 2) for Client 2.
@@ -131,7 +130,7 @@ If you are testing locally just type in your Browser: `loocalhost:1453/webui`
 
 > [!NOTE]
 > Since I am still not very familiar with Javascript, I had to vibecode the Javascript file. 
-> I want to rewrite this though
+> It needs to be rewritten though.
 
 # How this Reverseproxy was built?
 
