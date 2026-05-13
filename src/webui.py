@@ -5,17 +5,6 @@ from pathlib import Path
 import aiofiles
 
 async def path(http_header):
-    if http_header.startswith(b'GET /webui'):
-        async with aiofiles.open(Path(__file__).parent / 'webui.html', 'rb') as fh:
-            html = await fh.read()
-            header = (
-                "HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/html\r\n"
-                f"Content-Length: {len(html)}\r\n"
-                "\r\n"
-            )
-        return header.encode() + html
-
     if http_header.startswith(b'GET /webui.js'):
         async with aiofiles.open(Path(__file__).parent / 'webui.js', 'rb') as fh:
             js = await fh.read()
@@ -26,6 +15,17 @@ async def path(http_header):
                 '\r\n'
             )
         return header.encode() + js
+
+    if http_header.startswith(b'GET /webui'):
+        async with aiofiles.open(Path(__file__).parent / 'webui.html', 'rb') as fh:
+            html = await fh.read()
+            header = (
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html\r\n"
+                f"Content-Length: {len(html)}\r\n"
+                "\r\n"
+            )
+        return header.encode() + html
 
     if http_header.startswith(b'GET /favicon.ico'):
         async with aiofiles.open(Path(__file__).parent / 'favicon.webp', 'rb') as fh:
