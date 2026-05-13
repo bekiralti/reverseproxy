@@ -1294,14 +1294,6 @@ async def main():
 asyncio.run(main(), debug=True)
 ```
 
-<!--
-# Step 7: Saving server disk space
-
-# Step 8: Reverseproxy (we finally did it!)
-
-# Step 9: Accessories
--->
-
 # YouTube video explaining Python's AsyncIO
 
 The picture is a link to the actual YouTube video:
