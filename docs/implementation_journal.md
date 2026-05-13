@@ -274,7 +274,7 @@ from pathlib import Path
 d = docker.from_env()
 
 async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> None:
-    path = Path(__file__).parent.parent / 'data' / uuid.uuid4().hex
+    path = Path(__file__).parent.parent / 'data' / str(uuid.uuid4())
     await asyncio.to_thread(path.mkdir)
 
 async def main():
@@ -298,7 +298,7 @@ from pathlib import Path
 d = docker.from_env()
 
 async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> None:
-    path = Path(__file__).parent.parent / 'data' / uuid.uuid4().hex
+    path = Path(__file__).parent.parent / 'data' / str(uuid.uuid4())
     await asyncio.to_thread(path.mkdir)
     container = await asyncio.to_thread(
         d.containers.run,
@@ -330,7 +330,7 @@ from pathlib import Path
 d = docker.from_env()
 
 async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> None:
-    path = Path(__file__).parent.parent / 'data' / uuid.uuid4().hex
+    path = Path(__file__).parent.parent / 'data' / str(uuid.uuid4())
     await asyncio.to_thread(path.mkdir)
     container = await asyncio.to_thread(
         d.containers.run,
@@ -370,7 +370,7 @@ from pathlib import Path
 d = docker.from_env()
 
 async def client_connected_cb(reader: StreamReader, writer: StreamWriter) -> None:
-    path = Path(__file__).parent.parent.parent / 'data' / uuid.uuid4().hex
+    path = Path(__file__).parent.parent.parent / 'data' / str(uuid.uuid4())
     await asyncio.to_thread(path.mkdir)
     container = await asyncio.to_thread(
         d.containers.run,
@@ -451,7 +451,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     print(http_header)
 
     # Docker-Container
-    path = Path(__file__).parent.parent.parent / 'data' / uuid.uuid4().hex
+    path = Path(__file__).parent.parent.parent / 'data' / str(uuid.uuid4())
     print(path)
     await asyncio.to_thread(path.mkdir)
     container = await asyncio.to_thread(
@@ -505,7 +505,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     print(http_header)
 
     # Docker-Container
-    path = Path(__file__).parent.parent.parent / 'data' / uuid.uuid4().hex
+    path = Path(__file__).parent.parent.parent / 'data' / str(uuid.uuid4())
     await asyncio.to_thread(path.mkdir)
     container = await asyncio.to_thread(
         d.containers.run,
@@ -581,7 +581,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     print(http_header)
 
     # Docker-Container
-    path = Path(__file__).parent.parent.parent / 'data' / uuid.uuid4().hex
+    path = Path(__file__).parent.parent.parent / 'data' / str(uuid.uuid4())
     await asyncio.to_thread(path.mkdir)
     container = await asyncio.to_thread(
         d.containers.run,
@@ -648,7 +648,8 @@ This brings us to the next step.
 
 # Step 6: Identifying the Session
 
-There are multiple solutions to identify the session. I will simply use the UUID4 and set it as a Cookie for the Browser.
+There are multiple ways to identify the session. I will simply use the UUID4, 
+which I already use to create the data directory and set it as a Cookie for the Browser.
 
 <!--
 # Step 7: Saving server disk space
