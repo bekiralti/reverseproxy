@@ -9,7 +9,6 @@ from signal import SIGINT
 import docker
 from docker.models.containers import Container
 
-
 @dataclass(slots=True)
 class Session:
     container: Container
