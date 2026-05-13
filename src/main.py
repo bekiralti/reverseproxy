@@ -1,6 +1,7 @@
 # Standard libraries
-import asyncio, logging, uuid, re, shutil, signal, sys, time
+import asyncio, json, logging, uuid, re, shutil, signal, sys, time
 from asyncio import StreamReader, StreamWriter, IncompleteReadError
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from signal import SIGINT
@@ -9,13 +10,19 @@ from signal import SIGINT
 import docker
 from docker.models.containers import Container
 
+# Local libraries
+import webui
+
 @dataclass(slots=True)
 class Session:
     container: Container
     path: Path
     last_seen: float
+    mask_uuid4: int
 
 # Global variables
+counter = 0
+free_ids = deque()
 d = docker.from_env()
 logger = logging.getLogger(__name__)
 sessions = {}
@@ -42,13 +49,54 @@ async def poll_sessions():
                 await asyncio.to_thread(shutil.rmtree, session.path, ignore_errors=False, onerror=None)
                 await asyncio.to_thread(session.container.stop)
                 await asyncio.to_thread(session.container.remove)
+                free_ids.append(session.mask_uuid4)
                 del sessions[uuid4]
         await asyncio.sleep(60)
+
+def new_id() -> int:
+    global counter
+    if free_ids:
+        new_id = free_ids.popleft()
+    else:
+        counter += 1
+        new_id = counter
+    return new_id
 
 async def client_connected_cb(client_reader: StreamReader, client_writer: StreamWriter) -> None:
     # Try reading the UUID4 Cookie from the HTTP-Request
     http_header = await client_reader.readuntil(b'\r\n\r\n')
     logger.info(f"HTTP-Request Header: {http_header}")
+
+    # WebUI
+    if http_response := await webui.path(http_header):
+        logger.info("Client connected to the WebUI.")
+        client_writer.write(http_response)
+        await client_writer.drain()
+        client_writer.close()
+        await client_writer.wait_closed()
+        return
+    elif http_header.startswith(b'GET /events'):
+        logger.info("Starting SSE.")
+        client_writer.write((
+            b'HTTP/1.1 200 OK\r\n'
+            b'Content-Type: text/event-stream\r\n'
+            b'\r\n'
+        ))
+        while True:
+            data = [session.mask_uuid4 for session in sessions.values()]
+            data = f"data: {json.dumps(data)}\n\n"
+            client_writer.write(data.encode())
+
+            # Diese Exceptions treten i.d.R. auf, wenn die Verbindung unterbrochen wurde (Bsp.: Client hat Tab geschlossen)
+            try:
+                await client_writer.drain()
+            except ConnectionResetError:
+                logger.info("Client disconnected from the WebUI.")
+                client_writer.close()
+                # An dieser Stelle ist der Socket sowieso tot, await client_writer.wait_closed() wirft BrokenPipeError
+                # Fehlermeldung aus "/usr/lib/python3.14/asyncio/selector_events.py" ist hier nicht zu vermeiden
+                return
+            await asyncio.sleep(1)
 
     # Source for the UUID4 regex: https://stackoverflow.com/a/18516125
     uuid4 = re.search(rb'uuid4=([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})', http_header)
@@ -104,7 +152,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
             ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
             volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
         )
-        sessions[uuid4] = Session(container, path, time.time())
+        sessions[uuid4] = Session(container, path, time.time(), new_id())
         await asyncio.to_thread(container.reload)
         port = container.ports['1880/tcp'][0]['HostPort']
         logger.info(f"Port: {port}")

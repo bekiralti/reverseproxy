@@ -4,7 +4,7 @@ from pathlib import Path
 # 3rd Party Libraries
 import aiofiles
 
-async def handle_request(http_header):
+async def path(http_header):
     if http_header.startswith(b'GET /webui'):
         async with aiofiles.open(Path(__file__).parent / 'webui.html', 'rb') as fh:
             html = await fh.read()
