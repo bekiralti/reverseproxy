@@ -104,6 +104,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     logger.info(f"UUID4: {uuid4}")
 
     session = sessions.get(uuid4)
+    logger.debug(f"Session: {session}")
     if session:
         port = sessions[uuid4].container.ports['1880/tcp'][0]['HostPort']
         container_reader, container_writer = await asyncio.open_connection('localhost', port)
@@ -143,7 +144,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     else:
         uuid4 = str(uuid.uuid4())
         logger.info(f"UUID4: {uuid4}")
-        path = Path(__file__).parent.parent.parent / 'data' / uuid4
+        path = Path(__file__).parent.parent / 'data' / uuid4
         await asyncio.to_thread(path.mkdir)
         container = await asyncio.to_thread(
             d.containers.run,
