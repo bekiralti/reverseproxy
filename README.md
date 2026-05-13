@@ -87,9 +87,15 @@ Once you run this program
 python ./src/main.py
 ```
 
-open up a Browser of your choice (e.g. Firefox) and type in `localhost:1071`. 
+you can test it locally by opening up a Browser of your choice (e.g. Firefox) and typing in `localhost:1453`. 
 After a short while you should see a Node-RED Docker-Container loading up. 
-To simulate a second Client you can open another Browser in incognito mode and type in `localhost:1071`.
+To simulate a second Client you can open another Browser in incognito mode and type in `localhost:1453`.
+
+You might have to adjust the following line if you want to go *public*:
+
+```python
+s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
+```
 
 ## Basic usage / customization
 
@@ -117,6 +123,15 @@ docker_container = await asyncio.to_thread(
     volumes={path: {'bind': '/data', 'mode': 'rw'}}
 )
 ```
+
+## WebUI
+
+There is also a WebUI simply displaying the Clients and Containers in a diagram. 
+If you are testing locally just type in your Browser: `loocalhost:1453/webui`
+
+> [!NOTE]
+> Since I am still not very familiar with Javascript, I had to vibecode the Javascript file. 
+> I want to rewrite this though
 
 # How this Reverseproxy was built?
 
