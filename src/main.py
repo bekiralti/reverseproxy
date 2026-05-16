@@ -1,205 +1,212 @@
-# Standard libraries
-import asyncio, json, logging, uuid, re, shutil, signal, sys, time
+# Standard Libraries
+import asyncio, json, logging, signal, shutil, sys, time, uuid
 from asyncio import StreamReader, StreamWriter, IncompleteReadError
-from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
-from signal import SIGINT
 
-# 3rd party libraries
-import docker
-from docker.models.containers import Container
-
-# Local libraries
+# Local Libraries
 import webui
+from utils import (
+    available_webui_ids,
+    create_session,
+    get_http_content_length,
+    get_http_request_cookies,
+    get_http_request_path
+)
 
-@dataclass(slots=True)
-class Session:
-    container: Container
-    path: Path
-    last_seen: float
-    mask_uuid4: int
+class SSEClientClosedFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Fatal write error on socket transport" not in record.getMessage()  # This error is unavoidable when the Client closes the WebUI (SSE connection)
+logging.getLogger('asyncio').addFilter(SSEClientClosedFilter())
 
-# Global variables
-counter = 0
-free_ids = deque()
-d = docker.from_env()
 logger = logging.getLogger(__name__)
+
 sessions = {}
 
 def graceful_shutdown(signum, frame):
-    logger.info(f"Signal: {signum}, Frame: {frame}")
+    logger.debug(f"Signal: {signum}, Frame: {frame}")
     for session in sessions.values():
-        logger.info(f"Stop and Remove Docker-Container: {session.container}")
+        logger.debug(f"Stop and Remove Docker-Container: {session.container}")
         session.container.stop()
         session.container.remove()
-        shutil.rmtree(session.path)
+        shutil.rmtree(session.path, ignore_errors=False, onerror=None)
     sys.exit(0)
 
 async def poll_sessions():
     while True:
-        logger.info('Checking for expired sessions')
-
         # A *too tight* window leads to the deletion of the container before it can be even used
-        for uuid4, session in list(sessions.items()):
+        for sid, session in list(sessions.items()):
             elapsed_time = time.time() - session.last_seen
-            logger.info(f"Elapsed Time: {elapsed_time} seconds for {session}")
+            logger.debug(f"Elapsed Time: {elapsed_time} seconds for {session}")
             if elapsed_time > 60:
-                logger.info(f"This session is expired and will be deleted now.")
-                await asyncio.to_thread(shutil.rmtree, session.path, ignore_errors=False, onerror=None)
+                logger.debug(f"This session is expired and will be deleted now.")
                 await asyncio.to_thread(session.container.stop)
                 await asyncio.to_thread(session.container.remove)
-                free_ids.append(session.mask_uuid4)
-                del sessions[uuid4]
+                await asyncio.to_thread(shutil.rmtree, session.path, ignore_errors=False, onerror=None)
+                available_webui_ids.append(session.webui_id)
+                del sessions[sid]
         await asyncio.sleep(60)
 
-def new_id() -> int:
-    global counter
-    if free_ids:
-        new_id = free_ids.popleft()
-    else:
-        counter += 1
-        new_id = counter
-    return new_id
-
 async def client_connected_cb(client_reader: StreamReader, client_writer: StreamWriter) -> None:
-    # Try reading the UUID4 Cookie from the HTTP-Request
-    http_header = await client_reader.readuntil(b'\r\n\r\n')
-    logger.info(f"HTTP-Request Header: {http_header}")
+    # TODO: IP Rate Limiting, e.g. 10 Container Creations per IP per 60 seconds
+    http_request_header = await client_reader.readuntil(b'\r\n\r\n')  # HTTP-Header and HTTP-Body are always separated by a blank line: \r\n\r\n. Source: RFC 9112 (Section 2.1).
+    # TODO: Add Timeout
+    http_request_path = get_http_request_path(http_request_header)
 
-    # WebUI
-    if http_response := await webui.path(http_header):
-        logger.info("Client connected to the WebUI.")
+    if http_request_path == b'/webui':
+        http_response = await webui.get_html()
+
         client_writer.write(http_response)
         await client_writer.drain()
+
         client_writer.close()
         await client_writer.wait_closed()
+
         return
-    elif http_header.startswith(b'GET /events'):
-        logger.info("Starting SSE.")
-        client_writer.write((
-            b'HTTP/1.1 200 OK\r\n'
-            b'Content-Type: text/event-stream\r\n'
-            b'\r\n'
-        ))
+    elif http_request_path == b'/favicon.ico':
+        http_response = await webui.get_favicon()
+
+        client_writer.write(http_response)
+        await client_writer.drain()
+
+        client_writer.close()
+        await client_writer.wait_closed()
+
+        return
+    elif http_request_path == b'/webui.js':
+        http_response = await webui.get_webui_js()
+
+        client_writer.write(http_response)
+        await client_writer.drain()
+
+        client_writer.close()
+        await client_writer.wait_closed()
+
+        return
+    elif http_request_path == b'/events':
+        http_response = webui.get_events()
+        client_writer.write(http_response)
+
         while True:
-            data = [session.mask_uuid4 for session in sessions.values()]
-            data = f"data: {json.dumps(data)}\n\n"
+            data = [session.webui_id for session in sessions.values()]
+            data = f"data: {json.dumps(data)}\n\n"  # Liste data wird in JSON Syntax umformuliert
+
             client_writer.write(data.encode())
 
             # Diese Exception tritt i.d.R. auf, wenn die Verbindung unterbrochen wurde bspw. Client hat Tab geschlossen.
             try:
                 await client_writer.drain()
-            except ConnectionResetError:
-                logger.info("Client disconnected from the WebUI.")
+            except ConnectionResetError as e:
+                logger.error(f"ConnectionResetError: {e}")
+
                 client_writer.close()
-                # An dieser Stelle ist der Socket sowieso tot, await client_writer.wait_closed() wirft BrokenPipeError
-                # Fehlermeldung aus "/usr/lib/python3.14/asyncio/selector_events.py" ist hier nicht zu vermeiden
                 return
+
             await asyncio.sleep(1)
 
-    # Source for the UUID4 regex: https://stackoverflow.com/a/18516125
-    uuid4 = re.search(rb'uuid4=([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})', http_header)
-    uuid4 = uuid4.group(1).decode() if uuid4 else None
-    logger.info(f"UUID4: {uuid4}")
+    http_request_cookies = get_http_request_cookies(http_request_header)
+    sid = http_request_cookies.get('sid')  # sid stands for "session id"
 
-    session = sessions.get(uuid4)
-    logger.debug(f"Session: {session}")
-    if session:
-        port = sessions[uuid4].container.ports['1880/tcp'][0]['HostPort']
+    logger.debug(f"SID: {sid}")
+
+    if sid in sessions:
+        content_length = get_http_content_length(http_request_header)
+        http_request_body = await client_reader.readexactly(content_length)
+
+        logger.debug(f"HTTP Request Body: {http_request_body}")
+
+        port = sessions[sid].container.ports['1880/tcp'][0]['HostPort']
         container_reader, container_writer = await asyncio.open_connection('localhost', port)
 
-        # Forward HTTP-Request: Client -> Container
-        container_writer.write(http_header)
+        container_writer.write(http_request_header + http_request_body)
         await container_writer.drain()
 
-        # Forward HTTP-Response: Container -> Client
-        http_header = await container_reader.readuntil(b'\r\n\r\n')
-        logger.info(f"HTTP-Response Header: {http_header}")
-
-        content_length = re.search(rb'Content-Length:\s*(\d+)', http_header, re.IGNORECASE)
-        content_length = int(content_length.group(1)) if content_length else 0
-        http_body = await container_reader.readexactly(content_length)
-        logger.info(f"HTTP-Response Body: {http_body}")
-
-        client_writer.write(http_header + http_body)
-        await client_writer.drain()
-
-        # Client <-> Container
-        async def forward(reader: StreamReader, writer: StreamWriter) -> None:
+        async def forward(reader: StreamReader, writer: StreamWriter):
             while True:
-                session.last_seen = time.time()
+                sessions[sid].last_seen = time.time()
                 message = await reader.read(4096)
-                logger.debug(f"Forward: {message}")
                 if not message:
                     break
                 writer.write(message)
                 await writer.drain()
             writer.close()
             await writer.wait_closed()
+
         await asyncio.gather(
             forward(client_reader, container_writer),
             forward(container_reader, client_writer)
         )
-    else:
-        uuid4 = str(uuid.uuid4())
-        logger.info(f"UUID4: {uuid4}")
-        path = Path(__file__).parent.parent / 'data' / uuid4
-        await asyncio.to_thread(path.mkdir)
-        container = await asyncio.to_thread(
-            d.containers.run,
-            'nodered/node-red',
-            detach=True,                                     # -d
-            ports={'1880/tcp': 0},                           # -p 0:1880 (0 lets the kernel choose a free port)
-            volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v ./docker/data:/data
-        )
-        sessions[uuid4] = Session(container, path, time.time(), new_id())
-        await asyncio.to_thread(container.reload)
-        port = container.ports['1880/tcp'][0]['HostPort']
-        logger.info(f"Port: {port}")
 
+        return
+    else:
+        sid = uuid.uuid4().hex  # Linter warns unnecessarily when I use str(uuid.uuid4())
+        sessions[sid] = await create_session(sid)
+
+        await asyncio.to_thread(sessions[sid].container.reload)
+        port = sessions[sid].container.ports['1880/tcp'][0]['HostPort']
+        container_reader, container_writer = await asyncio.open_connection('localhost', port)
+
+        http_response_header = b''  # Just to calm down the linter
         while True:
             try:
-                container_reader, container_writer = await asyncio.open_connection('localhost', port)
-                container_writer.write(http_header)
+                container_writer.write(http_request_header)
                 await container_writer.drain()
 
-                http_header = await container_reader.readuntil(b'\r\n\r\n')
+                http_response_header = await container_reader.readuntil(b'\r\n\r\n')
             except ConnectionResetError as e:
-                logger.error(f"ConnectionResetError: {e}")
+                logger.debug(f"ConnectionResetError: {e}")
+
+                container_writer.close()
+
                 await asyncio.sleep(3)
+
+                container_reader, container_writer = await asyncio.open_connection('localhost', port)
                 continue
             except IncompleteReadError as e:
-                logger.error(f"IncompleteReadError: {e}")
+                logger.debug(f"IncompleteReadError: {e}")
+
+                container_writer.close()
+                await container_writer.wait_closed()
+
                 await asyncio.sleep(3)
+
+                container_reader, container_writer = await asyncio.open_connection('localhost', port)
                 continue
             break
+        http_response_header = http_response_header.replace(b'\r\n\r\n', f"\r\nSet-Cookie: sid={sid}\r\n\r\n".encode(), 1)
 
-        # Inject UUID4 Cookie inside Node-RED's HTTP-Response
-        http_header = http_header.replace(b'\r\n\r\n', f"\r\nSet-Cookie: uuid4={uuid4}\r\n\r\n".encode(), 1)
-        logger.info(f"HTTP-Response Header: {http_header}")
+        logger.debug(f"HTTP Response Header: {http_response_header}")
 
-        # Read HTTP-Body
-        content_length = re.search(rb'Content-Length:\s*(\d+)', http_header, re.IGNORECASE)
-        content_length = int(content_length.group(1)) if content_length else 0
-        http_body = await container_reader.readexactly(content_length)
-        logger.info(f"HTTP-Response Body: {http_body}")
+        content_length = get_http_content_length(http_response_header)
+        http_response_body = await container_reader.readexactly(content_length)
 
-        # Forward HTTP-Response: Container -> Client
-        client_writer.write(http_header + http_body)
-        await client_writer.drain()
+        logger.debug(f"HTTP Response Body: {http_response_body}")
+
+        client_writer.write(http_response_header + http_response_body)
+        await client_writer.drain()  # At this point, the Browser will fire up multiple TCP connections and request the referenced HTML, CSS, JS etc. files
+
+        client_writer.close()
+        await client_writer.wait_closed()
+
+        container_writer.close()
+        await container_writer.wait_closed()
+
+        return
 
 async def main():
-    signal.signal(SIGINT, graceful_shutdown)
-    s = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)
-    async with s:
-        await asyncio.gather(s.serve_forever(), poll_sessions())
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    socket = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)  # TODO: Add limit
+    async with socket:
+        await asyncio.gather(
+            socket.serve_forever(),
+            poll_sessions()
+        )
 
 if __name__ == '__main__':
+    path = Path(__file__).parent.parent / 'logs' / 'main.log'
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s.%(msecs)03d %(levelname)-7s %(name)-12s %(message)s",
         datefmt="%H:%M:%S",
-        handlers=[logging.FileHandler("main.log"), logging.StreamHandler()]
+        handlers=[logging.FileHandler(path, mode='w'), logging.StreamHandler()]
     )
     asyncio.run(main(), debug=True)

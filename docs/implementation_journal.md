@@ -8,7 +8,7 @@ Let's take a look again at the diagram from the video on the main page.
 
 ![2 Clients <-> Reverseproxy <-> 2 Containers](./pics/2clients-rp-2containers.png)
 
-Client 1 and Client 2 are supposed to connect to the Reverseproxy via typing in its URL in a Browser such as Firefox.
+Client 1 and Client 2 are supposed to connect to the Reverseproxy by typing in the URL in a Browser (e.g. Firefox).
 As soon as Client 1 connects the Reverseproxy starts a Node-RED Docker-Container for Client 1.
 As soon as Client 2 connects the Reverseproxy starts a Node-RED Docker-Container for Client 2.
 The Reverseproxy connects Client 1 with Container 1 and Client 2 with Container 2.
