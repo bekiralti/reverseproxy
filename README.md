@@ -105,7 +105,7 @@ You just have to change the Image name in the following part of the code:
 docker_container = await asyncio.to_thread(
     docker_client.containers.run,
     'nodered/node-red',
-    detach=cast(Literal[True], True),
+    detach=True,
     ports={'1880/tcp': 0},
     volumes={path: {'bind': '/data', 'mode': 'rw'}}
 )
@@ -117,11 +117,14 @@ Change `ǹodered/node-red` to any Docker-Image you would like to try out, e.g. `
 docker_container = await asyncio.to_thread(
     docker_client.containers.run,
     'my-docker-image',
-    detach=cast(Literal[True], True),
+    detach=True,
     ports={'1880/tcp': 0},
     volumes={path: {'bind': '/data', 'mode': 'rw'}}
 )
 ```
+
+> [!NOTE]
+> Since Node-RED speaks HTTP I suppose any other Docker-Image that also can speak HTTP should hopefully work flawlessly.
 
 ## WebUI
 
@@ -129,10 +132,22 @@ There is also a WebUI simply displaying the Clients and Containers in a diagram.
 If you are testing locally just type in your Browser: `loocalhost:1453/webui`
 
 > [!NOTE]
-> Since I am still not very familiar with Javascript, I had to vibecode the Javascript file. 
-> It needs to be rewritten though.
+> Since I am still not very familiar with JavaScript, I had to vibecode the JavaScript file. 
+> This means, it needs to be rewritten. Maybe with React, if it makes things easy?
+
+# What is next?
+
+Well, the following bullet points could be a plausible roadmap:
+
+- Advance the socket from HTTP to HTTPS.
+- Rewrite the *frontend* JavaScript code (, because it is 100 % LLM at this point of time) and make it more like in the animation.
+- Write test scripts.
 
 # How this Reverseproxy was built?
 
 If you are interested on the thought processes, reasoning and learning that went into this project,
 then feel free to read through [./docs/implementation_journal.md](./docs/implementation_journal.md).
+
+> [!NOTE]
+> The final source code differs from the Code snippets shown however the idea is fundamentally the same.
+> I structured the actual Source Code a little bit more than what is shown in the referenced Implementation Journal.
