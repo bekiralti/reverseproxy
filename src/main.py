@@ -13,10 +13,15 @@ from utils import (
     get_http_request_path
 )
 
-class SSEClientClosedFilter(logging.Filter):
+# Filtering unavoidable error messages, because they happen way too deep down in the lower levels of asyncio
+class LoggingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        return "Fatal write error on socket transport" not in record.getMessage()  # This error is unavoidable when the Client closes the WebUI (SSE connection)
-logging.getLogger('asyncio').addFilter(SSEClientClosedFilter())
+        message = record.getMessage()
+        return (
+            'Fatal read error on socket transport' not in message and  # Happens when trying to write on a Docker-Container which isn't ready yet
+            'Fatal write error on socket transport' not in message     # Happens when the Client closes the WebUI (SSE connection)
+        )
+logging.getLogger('asyncio').addFilter(LoggingFilter())
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +55,21 @@ async def poll_sessions():
 async def client_connected_cb(client_reader: StreamReader, client_writer: StreamWriter) -> None:
     # TODO: IP Rate Limiting, e.g. 10 Container Creations per IP per 60 seconds
     # TODO: Add Timeout
-    http_request_header = await client_reader.readuntil(b'\r\n\r\n')  # HTTP-Header and HTTP-Body are always separated by a blank line: \r\n\r\n. Source: RFC 9112 (Section 2.1).
-    http_request_path = get_http_request_path(http_request_header)
+    http_request_header = b''  # Calming down the Linter
+    try:
+        http_request_header = await client_reader.readuntil(b'\r\n\r\n')  # HTTP-Header and HTTP-Body are always separated by a blank line: \r\n\r\n. Source: RFC 9112 (Section 2.1).
+    except IncompleteReadError as e:
+        logger.debug(f"IncompleteReadError: {e}")
+        logger.debug(f"Read Message: {e.partial}")
 
+        client_writer.write(b'HTTP/1.1 400 Bad Request\r\n\r\n')
+        await client_writer.drain()
+
+        client_writer.close()
+        await client_writer.wait_closed()
     logger.debug(f"HTTP Request Header: {http_request_header}")
 
+    http_request_path = get_http_request_path(http_request_header)
     if http_request_path == b'/webui':
         http_response = await webui.get_html()
 
