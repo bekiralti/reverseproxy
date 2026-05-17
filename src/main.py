@@ -48,12 +48,17 @@ async def poll_sessions():
 
 async def client_connected_cb(client_reader: StreamReader, client_writer: StreamWriter) -> None:
     # TODO: IP Rate Limiting, e.g. 10 Container Creations per IP per 60 seconds
-    http_request_header = await client_reader.readuntil(b'\r\n\r\n')  # HTTP-Header and HTTP-Body are always separated by a blank line: \r\n\r\n. Source: RFC 9112 (Section 2.1).
     # TODO: Add Timeout
+    http_request_header = await client_reader.readuntil(b'\r\n\r\n')  # HTTP-Header and HTTP-Body are always separated by a blank line: \r\n\r\n. Source: RFC 9112 (Section 2.1).
     http_request_path = get_http_request_path(http_request_header)
+
+    logger.info(f"HTTP Request Header: {http_request_header}")
+    logger.info(f"HTTP Request Path: {http_request_path}")
 
     if http_request_path == b'/webui':
         http_response = await webui.get_html()
+
+        logger.info(f"WebUI HTML Response: {http_response}")
 
         client_writer.write(http_response)
         await client_writer.drain()
@@ -65,6 +70,8 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     elif http_request_path == b'/favicon.ico':
         http_response = await webui.get_favicon()
 
+        logger.info(f"WebUI Favicon Response: {http_response}")
+
         client_writer.write(http_response)
         await client_writer.drain()
 
@@ -75,6 +82,8 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     elif http_request_path == b'/webui.js':
         http_response = await webui.get_webui_js()
 
+        logger.info(f"WebUI JS Response: {http_response}")
+
         client_writer.write(http_response)
         await client_writer.drain()
 
@@ -84,11 +93,15 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
         return
     elif http_request_path == b'/events':
         http_response = webui.get_events()
-        client_writer.write(http_response)
 
+        logger.info(f"WebUI SSE Response: {http_response}")
+
+        client_writer.write(http_response)
         while True:
             data = [session.webui_id for session in sessions.values()]
             data = f"data: {json.dumps(data)}\n\n"  # Liste data wird in JSON Syntax umformuliert
+
+            logger.debug(f"SSE: {data}")
 
             client_writer.write(data.encode())
 
@@ -96,7 +109,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
             try:
                 await client_writer.drain()
             except ConnectionResetError as e:
-                logger.error(f"ConnectionResetError: {e}")
+                logger.debug(f"ConnectionResetError: {e}")
 
                 client_writer.close()
                 return
@@ -106,15 +119,20 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
     http_request_cookies = get_http_request_cookies(http_request_header)
     sid = http_request_cookies.get('sid')  # sid stands for "session id"
 
-    logger.debug(f"SID: {sid}")
+    logger.info(f"HTTP Request Cookies: {http_request_cookies}")
+    logger.info(f"SID: {sid}")
 
     if sid in sessions:
         content_length = get_http_content_length(http_request_header)
         http_request_body = await client_reader.readexactly(content_length)
 
-        logger.debug(f"HTTP Request Body: {http_request_body}")
+        logger.info(f"Content-Length: {content_length}")
+        logger.info(f"HTTP Request Body: {http_request_body}")
 
         port = sessions[sid].container.ports['1880/tcp'][0]['HostPort']
+
+        logger.info(f"Port: {port}")
+
         container_reader, container_writer = await asyncio.open_connection('localhost', port)
 
         container_writer.write(http_request_header + http_request_body)
@@ -126,6 +144,9 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
                 message = await reader.read(4096)
                 if not message:
                     break
+
+                logger.debug(f"Forward Message: {message}")
+
                 writer.write(message)
                 await writer.drain()
             writer.close()
@@ -141,10 +162,15 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
         sid = uuid.uuid4().hex  # Linter warns unnecessarily when I use str(uuid.uuid4())
         sessions[sid] = await create_session(sid)
 
+        logger.info(f"SID: {sid}")
+        logger.info(f"Session: {sessions[sid]}")
+
         await asyncio.to_thread(sessions[sid].container.reload)
         port = sessions[sid].container.ports['1880/tcp'][0]['HostPort']
-        container_reader, container_writer = await asyncio.open_connection('localhost', port)
 
+        logger.info(f"Port: {port}")
+
+        container_reader, container_writer = await asyncio.open_connection('localhost', port)
         http_response_header = b''  # Just to calm down the linter
         while True:
             try:
@@ -179,7 +205,8 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
         content_length = get_http_content_length(http_response_header)
         http_response_body = await container_reader.readexactly(content_length)
 
-        logger.debug(f"HTTP Response Body: {http_response_body}")
+        logger.info(f"Content-Length: {content_length}")
+        logger.info(f"HTTP Response Body: {http_response_body}")
 
         client_writer.write(http_response_header + http_response_body)
         await client_writer.drain()  # At this point, the Browser will fire up multiple TCP connections and request the referenced HTML, CSS, JS etc. files
