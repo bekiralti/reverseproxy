@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 
 sessions = {}
 
-def graceful_shutdown(signum, frame):
-    logger.debug(f"Signal: {signum}, Frame: {frame}")
+def graceful_shutdown():
     for session in sessions.values():
         logger.debug(f"Deleting Session: {session}")
         session.container.stop()
@@ -55,7 +54,6 @@ async def poll_sessions():
 async def client_connected_cb(client_reader: StreamReader, client_writer: StreamWriter) -> None:
     # TODO: IP Rate Limiting, e.g. 10 Container Creations per IP per 60 seconds
     # TODO: Add Timeout
-    http_request_header = b''  # Calming down the Linter
     try:
         http_request_header = await client_reader.readuntil(b'\r\n\r\n')  # HTTP-Header and HTTP-Body are always separated by a blank line: \r\n\r\n. Source: RFC 9112 (Section 2.1).
     except IncompleteReadError as e:
@@ -67,6 +65,8 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
 
         client_writer.close()
         await client_writer.wait_closed()
+
+        return
     logger.debug(f"HTTP Request Header: {http_request_header}")
 
     http_request_path = get_http_request_path(http_request_header)
@@ -209,7 +209,7 @@ async def client_connected_cb(client_reader: StreamReader, client_writer: Stream
         return
 
 async def main():
-    signal.signal(signal.SIGINT, graceful_shutdown)
+    asyncio.get_event_loop().add_signal_handler(signal.SIGINT, graceful_shutdown)  # type: ignore
     socket = await asyncio.start_server(client_connected_cb, '0.0.0.0', 1453)  # TODO: Add limit
     async with socket:
         await asyncio.gather(
