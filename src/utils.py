@@ -48,12 +48,6 @@ def get_http_request_path(http_request_header: bytes) -> bytes:
     http_request_line = http_request_header_fields[0]                                             # The first line in HTTP-Header is always the Request Line. Source: RFC 9112 (Section 2.1).
     http_request_method, http_request_path, http_request_version = http_request_line.split(b' ')  # Request Line always has the scheme: Method Path Version. Source: RFC 9112 (Section 3).
 
-    logger.debug(f"HTTP Request Fields: {http_request_header_fields}")
-    logger.debug(f"HTTP Request Line: {http_request_line}")
-    logger.debug(f"HTTP Request Method: {http_request_method}")
-    logger.debug(f"HTTP Request Path: {http_request_path}")
-    logger.debug(f"HTTP Request Version: {http_request_version}")
-
     return http_request_path
 
 def get_http_request_cookies(http_request_header: bytes) -> dict:
@@ -82,8 +76,6 @@ def get_http_request_cookies(http_request_header: bytes) -> dict:
                 http_request_cookies[name.decode()] = value.decode()
             break
 
-    logger.debug(f"HTTP Request Cookies: {http_request_cookies}")
-
     return http_request_cookies
 
 def get_http_content_length(http_header: bytes) -> int:
@@ -94,8 +86,6 @@ def get_http_content_length(http_header: bytes) -> int:
         if http_header_field.lower().startswith(b'content-length:'):
             content_length = int(http_header_field[15:].strip())
             break
-
-    logger.debug(f"Content-Length: {content_length}")
 
     return content_length
 
@@ -121,7 +111,5 @@ async def create_session(sid: str) -> Session:
         volumes={path: {'bind': '/data', 'mode': 'rw'}}  # -v reverseproxy/data/sid:/data
     )                                                    # type: ignore
     session = Session(container, time.time(), path, get_webui_id())
-
-    logger.debug(f"Session: {session}")
 
     return session
