@@ -19,8 +19,6 @@ async def get_html():
 
     http_response = header + html
 
-    logger.debug(f"HTTP Response: {http_response}")
-
     return http_response
 
 async def get_favicon():
@@ -34,8 +32,6 @@ async def get_favicon():
         )
 
     http_response = header + ico
-
-    logger.debug(f"HTTP Response: {http_response}")
 
     return http_response
 
@@ -51,8 +47,6 @@ async def get_webui_js():
 
     http_response = header + js
 
-    logger.debug(f"HTTP Response: {http_response}")
-
     return http_response
 
 def get_events():
@@ -61,7 +55,5 @@ def get_events():
         b'Content-Type: text/event-stream\r\n'
         b'\r\n'
     )
-
-    logger.debug(f"HTTP Response: {http_response}")
 
     return http_response
